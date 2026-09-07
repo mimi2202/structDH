@@ -1,20 +1,20 @@
-import React, { useEffect } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { FiFolder, FiUsers, FiSettings, FiPlus, FiGrid, FiClock } from 'react-icons/fi';
-import { useWorkspace } from '../contexts/WorkspaceContext';
-import { useTheme } from '../contexts/ThemeContext';
+import React, { useEffect } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { FiFolder, FiUsers, FiSettings, FiPlus, FiGrid, FiClock } from 'react-icons/fi'
+import { useWorkspace } from '../contexts/WorkspaceContext'
+import { useTheme } from '../contexts/ThemeContext'
 
 const WorkspaceDashboard = () => {
-  const { workspaceId } = useParams();
-  const { currentWorkspace, projects, members, loading, switchWorkspace } = useWorkspace();
-  const { isDarkMode } = useTheme();
+  const { workspaceId } = useParams()
+  const { currentWorkspace, projects, members, loading, switchWorkspace } = useWorkspace()
+  const { isDarkMode } = useTheme()
 
   useEffect(() => {
     if (workspaceId && (!currentWorkspace || currentWorkspace.id !== workspaceId)) {
       // Fetch workspace data
-      switchWorkspace({ id: workspaceId });
+      switchWorkspace({ id: workspaceId })
     }
-  }, [workspaceId]);
+  }, [workspaceId])
 
   if (loading) {
     return (
@@ -26,7 +26,7 @@ const WorkspaceDashboard = () => {
           <p className="text-[#6b7280]">Loading workspace...</p>
         </div>
       </div>
-    );
+    )
   }
 
   return (
@@ -87,7 +87,7 @@ const WorkspaceDashboard = () => {
                 <FiClock className="text-xl text-[#0A2F44] dark:text-[#cce1eb]" />
               </div>
               <span className="text-2xl font-bold text-[#02090d] dark:text-white">
-                {projects.filter(p => p.updated_at).length}
+                {projects.filter((p) => p.updated_at).length}
               </span>
             </div>
             <p className="text-[#6b7280] dark:text-[#9ca3af]">Active This Month</p>
@@ -97,9 +97,7 @@ const WorkspaceDashboard = () => {
         {/* Recent Projects */}
         <div className="bg-white dark:bg-[#1f2937] rounded-xl shadow-lg border border-[#e5e7eb] dark:border-[#374151] p-6 mb-8">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-bold text-[#02090d] dark:text-white">
-              Recent Projects
-            </h2>
+            <h2 className="text-lg font-bold text-[#02090d] dark:text-white">Recent Projects</h2>
             <Link
               to={`/workspace/${workspaceId}/projects`}
               className="text-sm text-[#0A2F44] dark:text-[#cce1eb] hover:underline"
@@ -111,9 +109,7 @@ const WorkspaceDashboard = () => {
           {projects.length === 0 ? (
             <div className="text-center py-12">
               <FiFolder className="text-4xl text-[#d1d5db] dark:text-[#4b5563] mx-auto mb-3" />
-              <p className="text-[#6b7280] dark:text-[#9ca3af] font-medium">
-                No projects yet
-              </p>
+              <p className="text-[#6b7280] dark:text-[#9ca3af] font-medium">No projects yet</p>
               <p className="text-sm text-[#9ca3af] dark:text-[#6b7280] mt-1">
                 Create your first project to get started
               </p>
@@ -186,7 +182,7 @@ const WorkspaceDashboard = () => {
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default WorkspaceDashboard;
+export default WorkspaceDashboard

@@ -1,17 +1,37 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { 
-  FiGrid, FiFolder, FiFileText, FiSettings, FiHelpCircle, 
-  FiSun, FiMoon, FiUser, FiLogOut, FiMenu, FiChevronLeft, FiX,
-  FiPlus, FiUsers, FiClock, FiEdit3, FiCalendar, FiActivity,
-  FiTrendingUp, FiCheckCircle, FiCircle, FiShield, FiSave, FiUpload
-} from 'react-icons/fi';
-import { useAuth } from '../contexts/AuthContext';
-import { useWorkspace } from '../contexts/WorkspaceContext';
-import { useTheme } from '../contexts/ThemeContext';
-import DesignStreak from '../components/ui/DesignStreak';
-import NotificationBell from '../components/notifications/NotificationBell';
-import { NotificationProvider } from '../contexts/NotificationContext';
+import React, { useEffect, useState } from 'react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import {
+  FiGrid,
+  FiFolder,
+  FiFileText,
+  FiSettings,
+  FiHelpCircle,
+  FiSun,
+  FiMoon,
+  FiUser,
+  FiLogOut,
+  FiMenu,
+  FiChevronLeft,
+  FiX,
+  FiPlus,
+  FiUsers,
+  FiClock,
+  FiEdit3,
+  FiCalendar,
+  FiActivity,
+  FiTrendingUp,
+  FiCheckCircle,
+  FiCircle,
+  FiShield,
+  FiSave,
+  FiUpload,
+} from 'react-icons/fi'
+import { useAuth } from '../contexts/AuthContext'
+import { useWorkspace } from '../contexts/WorkspaceContext'
+import { useTheme } from '../contexts/ThemeContext'
+import DesignStreak from '../components/ui/DesignStreak'
+import NotificationBell from '../components/notifications/NotificationBell'
+import { NotificationProvider } from '../contexts/NotificationContext'
 
 // Mock projects data (shared with Projects page)
 export const mockProjects = [
@@ -19,12 +39,13 @@ export const mockProjects = [
     id: 'proj-1',
     workspace_id: 'ws-1',
     name: 'London Office Tower',
-    description: '25-storey commercial office building in Canary Wharf with retail space on ground floor',
+    description:
+      '25-storey commercial office building in Canary Wharf with retail space on ground floor',
     project_type: 'commercial',
     location: 'London, UK',
     design_standard: 'Eurocode',
     status: 'active',
-    updated_at: '2026-02-18T14:30:00Z'
+    updated_at: '2026-02-18T14:30:00Z',
   },
   {
     id: 'proj-2',
@@ -32,11 +53,11 @@ export const mockProjects = [
     name: 'Riverside Apartments',
     description: 'Residential complex with 120 units, underground parking, and communal gardens',
     project_type: 'residential',
-    
+
     location: 'Manchester, UK',
     design_standard: 'Eurocode',
     status: 'active',
-    updated_at: '2026-02-17T16:20:00Z'
+    updated_at: '2026-02-17T16:20:00Z',
   },
   {
     id: 'proj-3',
@@ -47,7 +68,7 @@ export const mockProjects = [
     location: 'Birmingham, UK',
     design_standard: 'Eurocode',
     status: 'active',
-    updated_at: '2026-02-16T11:10:00Z'
+    updated_at: '2026-02-16T11:10:00Z',
   },
   {
     id: 'proj-4',
@@ -58,22 +79,22 @@ export const mockProjects = [
     location: 'Leeds, UK',
     design_standard: 'Eurocode',
     status: 'active',
-    updated_at: '2026-02-15T09:45:00Z'
+    updated_at: '2026-02-15T09:45:00Z',
   },
-];
+]
 
 const Dashboard = () => {
-  const { user, logout } = useAuth();
-  const { workspaces, loading, refreshWorkspaces } = useWorkspace();
-  const { isDarkMode, toggleDarkMode } = useTheme();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [selectedWorkspace, setSelectedWorkspace] = useState(null);
-  const [allProjects, setAllProjects] = useState([]);
-  const [showLoading, setShowLoading] = useState(false);
-  
+  const { user, logout } = useAuth()
+  const { workspaces, loading, refreshWorkspaces } = useWorkspace()
+  const { isDarkMode, toggleDarkMode } = useTheme()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [selectedWorkspace, setSelectedWorkspace] = useState(null)
+  const [allProjects, setAllProjects] = useState([])
+  const [showLoading, setShowLoading] = useState(false)
+
   // Mock activity data (replace with real data from backend)
   const [activityData, setActivityData] = useState({
     lastActive: new Date().toISOString(),
@@ -88,93 +109,100 @@ const Dashboard = () => {
       { date: '2026-03-29', count: 1 },
       { date: '2026-03-30', count: 4 },
       { date: '2026-03-31', count: 2 },
-    ]
-  });
+    ],
+  })
 
-
-  
   // Load mock projects
   useEffect(() => {
-    setAllProjects(mockProjects);
-  }, []);
+    setAllProjects(mockProjects)
+  }, [])
 
   // Only show loading when navigating back to dashboard (not on initial mount)
   useEffect(() => {
-    const isNavigating = document.referrer && document.referrer.includes(window.location.origin);
-    
+    const isNavigating = document.referrer && document.referrer.includes(window.location.origin)
+
     if (isNavigating) {
-      setShowLoading(true);
+      setShowLoading(true)
       const timer = setTimeout(() => {
-        setShowLoading(false);
-      }, 500);
-      return () => clearTimeout(timer);
+        setShowLoading(false)
+      }, 500)
+      return () => clearTimeout(timer)
     }
-  }, [location.pathname]);
+  }, [location.pathname])
 
   useEffect(() => {
-    refreshWorkspaces();
-  }, []);
+    refreshWorkspaces()
+  }, [])
 
   useEffect(() => {
     if (workspaces.length > 0 && !selectedWorkspace) {
-      setSelectedWorkspace(workspaces[0]);
+      setSelectedWorkspace(workspaces[0])
     }
-  }, [workspaces]);
+  }, [workspaces])
 
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 768) {
-        setIsMobileMenuOpen(false);
+        setIsMobileMenuOpen(false)
       }
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   const handleLogout = async () => {
-    await logout();
-    navigate('/login');
-  };
+    await logout()
+    navigate('/login')
+  }
 
   const getWorkspaceId = () => {
-    return selectedWorkspace?.id || (workspaces.length > 0 ? workspaces[0].id : 'ws-1');
-  };
+    return selectedWorkspace?.id || (workspaces.length > 0 ? workspaces[0].id : 'ws-1')
+  }
 
- const tabs = [
-  { name: 'Dashboard', icon: FiGrid, path: '/dashboard', active: true },
-   { name: 'Organization', icon: FiShield, path: `/workspace/${getWorkspaceId()}`, active: false },
-  { name: 'New Design', icon: FiEdit3, path: '/quick-design', active: false },
-  { name: 'New Project', icon: FiPlus, path: '/workspace/create', active: false },
-  { name: 'Projects', icon: FiFolder, path: `/workspace/${getWorkspaceId()}/projects`, active: false },
-  { name: 'Reports', icon: FiFileText, path: '/reports', active: false },
-  { name: 'External Design', icon: FiUpload, path: '/external-design', active: false },
-  { name: 'Help', icon: FiHelpCircle, path: '/help', active: false },
-  { name: 'Saved Designs', icon: FiSave, path: '/saved-designs', active: false },
-];
+  const tabs = [
+    { name: 'Dashboard', icon: FiGrid, path: '/dashboard', active: true },
+    { name: 'Organization', icon: FiShield, path: `/workspace/${getWorkspaceId()}`, active: false },
+    { name: 'New Design', icon: FiEdit3, path: '/quick-design', active: false },
+    { name: 'New Project', icon: FiPlus, path: '/workspace/create', active: false },
+    {
+      name: 'Projects',
+      icon: FiFolder,
+      path: `/workspace/${getWorkspaceId()}/projects`,
+      active: false,
+    },
+    { name: 'Reports', icon: FiFileText, path: '/reports', active: false },
+    { name: 'External Design', icon: FiUpload, path: '/external-design', active: false },
+    { name: 'Help', icon: FiHelpCircle, path: '/help', active: false },
+    { name: 'Saved Designs', icon: FiSave, path: '/saved-designs', active: false },
+  ]
 
   const getUserInitials = () => {
     if (user?.name) {
-      return user.name.split(' ').map(n => n[0]).join('').toUpperCase();
+      return user.name
+        .split(' ')
+        .map((n) => n[0])
+        .join('')
+        .toUpperCase()
     }
-    return 'JE';
-  };
+    return 'JE'
+  }
 
   // Calculate stats from actual projects
-  const totalProjects = allProjects.length;
-  const activeThisMonth = allProjects.filter(p => {
-    const updated = new Date(p.updated_at);
-    const now = new Date();
-    return updated.getMonth() === now.getMonth() && updated.getFullYear() === now.getFullYear();
-  }).length;
+  const totalProjects = allProjects.length
+  const activeThisMonth = allProjects.filter((p) => {
+    const updated = new Date(p.updated_at)
+    const now = new Date()
+    return updated.getMonth() === now.getMonth() && updated.getFullYear() === now.getFullYear()
+  }).length
 
   // Calculate activity level for heatmap
   const getActivityLevel = (count) => {
-    if (count === 0) return 'bg-[#e5e7eb] dark:bg-[#374151]';
-    if (count === 1) return 'bg-[#cce1eb] dark:bg-[#1e3a4a]';
-    if (count === 2) return 'bg-[#99c2d6] dark:bg-[#2a4a5a]';
-    if (count === 3) return 'bg-[#66a4c2] dark:bg-[#3a6a7a]';
-    return 'bg-[#0A2F44] dark:bg-[#66a4c2]';
-  };
+    if (count === 0) return 'bg-[#e5e7eb] dark:bg-[#374151]'
+    if (count === 1) return 'bg-[#cce1eb] dark:bg-[#1e3a4a]'
+    if (count === 2) return 'bg-[#99c2d6] dark:bg-[#2a4a5a]'
+    if (count === 3) return 'bg-[#66a4c2] dark:bg-[#3a6a7a]'
+    return 'bg-[#0A2F44] dark:bg-[#66a4c2]'
+  }
 
   // Show loading only when navigating between pages
   if (showLoading) {
@@ -187,13 +215,13 @@ const Dashboard = () => {
           <p className="text-[#6b7280] dark:text-[#9ca3af]">Loading dashboard...</p>
         </div>
       </div>
-    );
+    )
   }
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#111827] flex transition-colors duration-300">
       {/* Desktop Sidebar */}
-      <div 
+      <div
         className={`hidden md:flex bg-white dark:bg-[#1f2937] border-r border-[#e5e7eb] dark:border-[#374151] flex-col transition-all duration-300 ${
           isSidebarOpen ? 'w-64' : 'w-20'
         }`}
@@ -225,9 +253,7 @@ const Dashboard = () => {
                   title={!isSidebarOpen ? tab.name : ''}
                 >
                   <tab.icon className="text-lg flex-shrink-0" />
-                  {isSidebarOpen && (
-                    <span className="text-sm font-medium">{tab.name}</span>
-                  )}
+                  {isSidebarOpen && <span className="text-sm font-medium">{tab.name}</span>}
                 </Link>
               </li>
             ))}
@@ -303,9 +329,9 @@ const Dashboard = () => {
         <button
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           className="hidden md:flex absolute items-center justify-center w-6 h-6 bg-white dark:bg-[#1f2937] border border-[#e5e7eb] dark:border-[#374151] rounded-full shadow-md hover:shadow-lg transition-all cursor-pointer"
-          style={{ 
+          style={{
             left: isSidebarOpen ? 'calc(16rem - 12px)' : 'calc(5rem - 12px)',
-            top: '84px'
+            top: '84px',
           }}
         >
           {isSidebarOpen ? (
@@ -319,7 +345,7 @@ const Dashboard = () => {
       {/* Mobile Menu Overlay */}
       {isMobileMenuOpen && (
         <>
-          <div 
+          <div
             className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 md:hidden"
             onClick={() => setIsMobileMenuOpen(false)}
           />
@@ -341,21 +367,21 @@ const Dashboard = () => {
               </div>
               <nav className="flex-1 p-4 overflow-y-auto">
                 <ul className="space-y-2">
-                 {tabs.map((tab) => (
-  <Link
-    key={tab.name}
-    to={tab.path}
-    onClick={() => setIsMobileMenuOpen(false)}
-    className={`flex items-center space-x-3 px-4 py-3 rounded-lg mb-2 transition-colors ${
-      tab.active
-        ? 'bg-[#0A2F44] text-white'
-        : 'text-[#6b7280] dark:text-[#9ca3af] hover:bg-[#f3f4f6] dark:hover:bg-[#374151] hover:text-[#0A2F44] dark:hover:text-[#cce1eb]'
-    }`}
-  >
-    <tab.icon className="text-lg flex-shrink-0" />
-    <span className="text-sm font-medium">{tab.name}</span>
-  </Link>
-))}
+                  {tabs.map((tab) => (
+                    <Link
+                      key={tab.name}
+                      to={tab.path}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={`flex items-center space-x-3 px-4 py-3 rounded-lg mb-2 transition-colors ${
+                        tab.active
+                          ? 'bg-[#0A2F44] text-white'
+                          : 'text-[#6b7280] dark:text-[#9ca3af] hover:bg-[#f3f4f6] dark:hover:bg-[#374151] hover:text-[#0A2F44] dark:hover:text-[#cce1eb]'
+                      }`}
+                    >
+                      <tab.icon className="text-lg flex-shrink-0" />
+                      <span className="text-sm font-medium">{tab.name}</span>
+                    </Link>
+                  ))}
                 </ul>
               </nav>
               <div className="p-4 border-t border-[#e5e7eb] dark:border-[#374151]">
@@ -419,7 +445,7 @@ const Dashboard = () => {
               </div>
             </div>
             <div className="flex items-center space-x-3">
-               <NotificationBell />
+              <NotificationBell />
               <div className="hidden md:block">
                 <div className="w-10 h-10 bg-[#0A2F44] rounded-full flex items-center justify-center text-white font-medium shadow-md">
                   {getUserInitials()}
@@ -443,7 +469,9 @@ const Dashboard = () => {
 
             <div className="bg-white dark:bg-[#1f2937] rounded-xl shadow-lg p-6 border border-[#e5e7eb] dark:border-[#374151]">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-[#6b7280] dark:text-[#9ca3af]">Active This Month</span>
+                <span className="text-sm text-[#6b7280] dark:text-[#9ca3af]">
+                  Active This Month
+                </span>
                 <FiActivity className="text-[#0A2F44] dark:text-[#cce1eb]" />
               </div>
               <p className="text-3xl font-bold text-[#02090d] dark:text-white">{activeThisMonth}</p>
@@ -457,7 +485,9 @@ const Dashboard = () => {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-2">
                 <FiCalendar className="text-[#0A2F44] dark:text-[#cce1eb]" />
-                <h3 className="text-lg font-semibold text-[#02090d] dark:text-white">Activity Overview</h3>
+                <h3 className="text-lg font-semibold text-[#02090d] dark:text-white">
+                  Activity Overview
+                </h3>
               </div>
               <div className="flex items-center space-x-2 text-xs text-[#6b7280] dark:text-[#9ca3af]">
                 <span>Less</span>
@@ -471,19 +501,25 @@ const Dashboard = () => {
                 <span>More</span>
               </div>
             </div>
-            
+
             {/* Activity Heatmap Grid */}
             <div className="grid grid-cols-7 gap-1.5">
               {activityData.contributions.map((day, idx) => (
                 <div key={idx} className="text-center group relative">
-                  <div className={`w-8 h-8 rounded-md ${getActivityLevel(day.count)} transition-all hover:scale-110 cursor-pointer`}></div>
+                  <div
+                    className={`w-8 h-8 rounded-md ${getActivityLevel(day.count)} transition-all hover:scale-110 cursor-pointer`}
+                  ></div>
                   <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                    {new Date(day.date).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' })}: {day.count} design{day.count !== 1 ? 's' : ''}
+                    {new Date(day.date).toLocaleDateString('en-GB', {
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                    : {day.count} design{day.count !== 1 ? 's' : ''}
                   </div>
                 </div>
               ))}
             </div>
-            
+
             {/* Activity Stats */}
             <div className="flex flex-wrap justify-between items-center mt-4 pt-3 border-t border-[#e5e7eb] dark:border-[#374151]">
               <div className="flex items-center space-x-4 text-sm text-[#6b7280] dark:text-[#9ca3af]">
@@ -506,9 +542,11 @@ const Dashboard = () => {
           {/* Recent Projects Section - Shows ONLY 2 projects */}
           <div className="bg-white dark:bg-[#1f2937] rounded-xl shadow-lg border border-[#e5e7eb] dark:border-[#374151] p-6">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-[#02090d] dark:text-white">Recent Projects</h3>
-              <Link 
-                to={`/workspace/${getWorkspaceId()}/projects`} 
+              <h3 className="text-lg font-semibold text-[#02090d] dark:text-white">
+                Recent Projects
+              </h3>
+              <Link
+                to={`/workspace/${getWorkspaceId()}/projects`}
                 className="text-sm text-[#0A2F44] dark:text-[#cce1eb] hover:underline"
               >
                 View all
@@ -545,12 +583,17 @@ const Dashboard = () => {
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div>
-                        <span className={`text-xs px-2 py-1 rounded-full ${
-                          project.project_type === 'residential' ? 'bg-green-100 text-green-700' :
-                          project.project_type === 'commercial' ? 'bg-blue-100 text-blue-700' :
-                          project.project_type === 'industrial' ? 'bg-orange-100 text-orange-700' :
-                          'bg-purple-100 text-purple-700'
-                        }`}>
+                        <span
+                          className={`text-xs px-2 py-1 rounded-full ${
+                            project.project_type === 'residential'
+                              ? 'bg-green-100 text-green-700'
+                              : project.project_type === 'commercial'
+                                ? 'bg-blue-100 text-blue-700'
+                                : project.project_type === 'industrial'
+                                  ? 'bg-orange-100 text-orange-700'
+                                  : 'bg-purple-100 text-purple-700'
+                          }`}
+                        >
                           {project.project_type}
                         </span>
                       </div>
@@ -558,15 +601,15 @@ const Dashboard = () => {
                         <FiFolder className="text-[#0A2F44] dark:text-[#cce1eb]" />
                       </div>
                     </div>
-                    
+
                     <h4 className="text-lg font-semibold text-[#02090d] dark:text-white mb-2">
                       {project.name}
                     </h4>
-                    
+
                     <p className="text-sm text-[#6b7280] dark:text-[#9ca3af] mb-4 line-clamp-2">
                       {project.description || 'No description available'}
                     </p>
-                    
+
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-[#0A2F44] dark:text-[#cce1eb] font-medium">
                         {project.design_standard || 'Eurocode'}
@@ -577,9 +620,7 @@ const Dashboard = () => {
                     </div>
 
                     {project.location && (
-                      <div className="mt-3 text-xs text-[#9ca3af]">
-                        📍 {project.location}
-                      </div>
+                      <div className="mt-3 text-xs text-[#9ca3af]">📍 {project.location}</div>
                     )}
                   </Link>
                 ))}
@@ -589,7 +630,7 @@ const Dashboard = () => {
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default Dashboard;
+export default Dashboard

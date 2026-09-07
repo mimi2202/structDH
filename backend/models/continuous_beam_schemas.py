@@ -158,6 +158,12 @@ class ContinuousBeamResult(BaseModel):
     forces: CBForces
     capacity: CBCapacity
     sls: CBSLS
+    # Structured shear/deflection derivation, matching the level of detail
+    # already exposed for the simply-supported beam (beam_schemas.py) --
+    # the engine already computed these values, they just weren't surfaced
+    # as response fields before, only as formatted text inside `report`.
+    shear_detail: Optional[Dict] = None
+    deflection_detail: Optional[Dict] = None
     report: List[ReportSection]
     warnings: List[str]
     notes: List[str]

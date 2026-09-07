@@ -1,9 +1,11 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { exportElementToPdf } from "../utils/exportPdf";
+import { useDesignMeta } from "../contexts/DesignMetaContext";
+import DetailedReport from "../components/DetailedReport";
 import {
   FiArrowLeft, FiAlertTriangle, FiInfo, FiCheckCircle, FiXCircle, FiFileText,
-  FiDownload, FiX, FiLayers, FiGrid, FiActivity, FiBox, FiZap, FiBarChart2,
+  FiDownload, FiLayers, FiGrid, FiActivity, FiBox, FiZap, FiBarChart2,
 } from "react-icons/fi";
 
 const CARD = "bg-white dark:bg-[#1f2937] rounded-xl border border-[#e2e8f0] dark:border-[#334155] shadow-sm";
@@ -13,12 +15,27 @@ const ACCENT = "text-[#0A2F44] dark:text-[#66a4c2]";
 const HOG = "#ef4444";   // negative / hogging
 const SAG = "#22c55e";   // positive / sagging
 
+const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection"];
+
 export default function ContinuousBeamResults() {
   const navigate = useNavigate();
   const location = useLocation();
   const data = location.state?.designResult;
   const [reportOpen, setReportOpen] = useState(false);
   const sheetRef = useRef(null);
+  const [tab, setTab] = useState("Overview");
+  const { setDesignMeta } = useDesignMeta();
+
+  useEffect(() => {
+    if (!data?.summary) return;
+    setDesignMeta({
+      designCode: data.summary.design_code,
+      analysisMethod: data.summary.analysis,
+      concreteGrade: data.summary.concrete_grade,
+      steelGrade: data.summary.steel_grade,
+    });
+    return () => setDesignMeta(null);
+  }, [data, setDesignMeta]);
 
   if (!data) {
     return (
@@ -86,6 +103,21 @@ export default function ContinuousBeamResults() {
         </div>
       )}
 
+      {/* TABS -- Overview below is completely untouched from before; these
+          are ADDITIONAL views only, not a replacement or reorganization. */}
+      <div className="cb-no-print mb-5 flex gap-6 overflow-x-auto border-b border-[#e2e8f0] dark:border-[#334155]">
+        {TABS.map((t) => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-2.5 text-[12px] font-semibold uppercase tracking-wide transition-colors ${
+              tab === t ? "border-[#0A2F44] dark:border-[#66a4c2] text-[#0A2F44] dark:text-[#66a4c2]"
+                        : `border-transparent ${SUB} hover:text-[#0F172A] dark:hover:text-white`}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {tab === "Overview" && (
+      <>
       {/* dashboard grid */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <Card n="1" title="Geometry & Supports">
@@ -169,6 +201,13 @@ export default function ContinuousBeamResults() {
         </Card>
       </div>
 
+      </>
+      )}
+
+      {tab === "Flexural Design" && <FlexuralTab data={data} />}
+      {tab === "Shear Design" && <ShearTab data={data} />}
+      {tab === "Deflection" && <DeflectionTab data={data} />}
+
       <div className="cb-no-print mt-6 flex items-center justify-between border-t border-[#e2e8f0] dark:border-[#334155] pt-4">
         <button onClick={() => navigate("/continuous-beam")} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}><FiArrowLeft size={15} /> Back to Input</button>
       </div>
@@ -178,43 +217,25 @@ export default function ContinuousBeamResults() {
   );
 }
 
-/* ---------------- detailed report modal (Image 2) ---------------- */
+/* ---------------- detailed report modal ----------------
+   PRINT FIX: this used to be a separate, never-patched implementation with
+   its own `visibility: hidden/visible` + `position: absolute` print CSS --
+   the exact bug already found and fixed for the simply-supported beam's
+   report modal (see BeamReportModal.jsx). A `position: fixed` ancestor gets
+   repainted on every printed page, which produced a blank/broken export
+   here. Now delegates to the shared DetailedReport component, which uses
+   the proven clone-to-static-div export (exportElementToPdf) instead. */
 function ReportModal({ report, summary, onClose }) {
+  const subtitle = summary
+    ? [summary.beam_id, summary.design_code].filter(Boolean).join(" \u00b7 ")
+    : "";
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-auto bg-black/50 p-4 backdrop-blur-sm">
-      <div className="cb-report w-full max-w-5xl rounded-xl bg-white text-[#0F172A] shadow-2xl ring-1 ring-black/5 dark:bg-[#0f172a] dark:text-slate-200 dark:ring-white/10">
-        <div className="cb-no-print sticky top-0 flex items-center justify-between border-b border-[#e2e8f0] bg-white px-6 py-4 dark:border-white/10 dark:bg-[#0f172a]">
-          <div>
-            <h2 className="text-base font-bold text-[#0F172A] dark:text-white">Detailed Calculation Report</h2>
-            <p className="text-xs text-[#64748b] dark:text-slate-400">{summary.beam_id} · {summary.design_code}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => window.print()} className="flex items-center gap-2 rounded-lg bg-[#e6f0f5] px-3 py-1.5 text-sm text-[#0A2F44] hover:bg-[#d4e6ef] dark:bg-[#1e3a4a] dark:text-[#66a4c2] dark:hover:bg-[#22485c]"><FiDownload size={14} /> Print / PDF</button>
-            <button onClick={onClose} className="rounded-lg p-1.5 text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0F172A] dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white"><FiX size={18} /></button>
-          </div>
-        </div>
-
-        <div className="px-6 py-5">
-          <div className="grid grid-cols-[180px_1fr_200px] gap-4 border-b border-[#e2e8f0] pb-3 text-sm font-semibold text-[#0F172A] dark:border-white/10 dark:text-white">
-            <div>Reference</div><div>Calculations</div><div>Output</div>
-          </div>
-          {report.map((sec, si) => (
-            <div key={si}>
-              <div className="mt-4 mb-1 text-[13px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">{sec.title}</div>
-              {sec.rows.map((r, ri) => (
-                <div key={ri} className="grid grid-cols-[180px_1fr_200px] gap-4 border-b border-[#f1f5f9] py-3 text-[13px] dark:border-white/5">
-                  <div className="font-mono text-[12px] text-[#64748b] dark:text-slate-400">{r.reference}</div>
-                  <div className="whitespace-pre-line font-mono leading-relaxed text-[#334155] dark:text-slate-200">{r.calculation}</div>
-                  <div className="whitespace-pre-line font-mono font-semibold text-[#0F172A] dark:text-white">{r.output}</div>
-                </div>
-              ))}
-            </div>
-          ))}
-          <p className="mt-5 text-[11px] text-[#94a3b8] dark:text-slate-500">Calculation trace generated from the design engine. Verify coefficient values and code clauses against your reference copy before use.</p>
-        </div>
-      </div>
-      <style>{`@media print { .cb-no-print{display:none!important} body *{visibility:hidden} .cb-report,.cb-report *{visibility:visible} .cb-report{position:absolute;left:0;top:0;width:100%;background:#fff;color:#000} }`}</style>
-    </div>
+    <DetailedReport
+      report={report}
+      heading="Detailed Calculation Report"
+      subtitle={subtitle}
+      onClose={onClose}
+    />
   );
 }
 
@@ -356,6 +377,169 @@ function Section({ bars, label, w, d }) {
         <text x="45" y="105" fontSize="7" fill="currentColor" textAnchor="middle">{w} × {d}</text>
       </svg>
       <p className={`text-[11px] font-medium ${SUB}`}>{label}</p>
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  NEW DETAIL TABS -- additional views alongside the untouched         */
+/*  Overview above; each shows full derivation for ONE topic only,      */
+/*  matching the slab results page's Flexural/Shear/Deflection tabs.    */
+/* ================================================================== */
+function DRow({ label, value, result, ok }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-[#f1f5f9] py-1.5 last:border-0 dark:border-[#263244]">
+      <div className="min-w-0 flex-1">
+        <div className={`text-[11px] font-medium ${MAIN}`}>{label}</div>
+        {value ? <div className={`font-mono text-[11px] ${SUB}`}>{value}</div> : null}
+      </div>
+      <div className={`flex-shrink-0 whitespace-nowrap text-right font-mono text-[12px] font-semibold ${
+        ok === undefined ? MAIN : ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+      }`}>
+        {result}
+      </div>
+    </div>
+  );
+}
+
+function FlexuralTab({ data }) {
+  const { summary, spans, supports, capacity, forces } = data;
+  const rows = [
+    ...spans.map((s) => ({ label: `Span ${s.index}`, sd: s.bottom_steel, M: s.m_sagging })),
+    ...supports.filter((sp) => sp.m_hogging > 0).map((sp) => ({ label: sp.label + ` (S${sp.index})`, sd: sp.top_steel, M: sp.m_hogging })),
+  ];
+  return (
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <section className={`${CARD} lg:col-span-2`}>
+        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5">
+          <h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Flexural Design &mdash; Full Derivation (EC2 &sect;6.1)</h3>
+        </header>
+        <div className="overflow-x-auto p-4">
+          <table className="w-full text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-[#e2e8f0] dark:border-[#334155] text-[10px] uppercase tracking-wide text-[#94a3b8]">
+                {["Location", "M_Ed (kNm)", "K", "z (mm)", "b_eff (mm)", "As,req", "As,prov", "Status"].map((h) => (
+                  <th key={h} className="px-2 py-2 font-semibold">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const okRow = r.sd.area_provided >= r.sd.area_required;
+                return (
+                  <tr key={i} className="border-b border-[#f1f5f9] dark:border-[#263244]">
+                    <td className={`px-2 py-2 font-medium ${MAIN}`}>{r.label}</td>
+                    <td className={`px-2 py-2 font-mono ${SUB}`}>{r.M}</td>
+                    <td className={`px-2 py-2 font-mono ${SUB}`}>{r.sd.K?.toFixed(4)}</td>
+                    <td className={`px-2 py-2 font-mono ${SUB}`}>{r.sd.z_mm?.toFixed(1)}</td>
+                    <td className={`px-2 py-2 font-mono ${SUB}`}>{r.sd.beff_mm ? r.sd.beff_mm.toFixed(0) : "\u2014 (rect.)"}</td>
+                    <td className={`px-2 py-2 font-mono ${SUB}`}>{r.sd.area_required}</td>
+                    <td className={`px-2 py-2 font-mono ${MAIN}`}>{r.sd.label} ({r.sd.area_provided})</td>
+                    <td className="px-2 py-2">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${okRow ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
+                        {okRow ? "OK" : "FAIL"}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className={`mt-3 text-[11px] ${SUB}`}>As,min for this member = {rows[0]?.sd.as_min_mm2} mm&sup2;/m (EC2 &sect;9.2.1.1, same d applies at every span and support).</p>
+          <div className="mt-3 flex items-center justify-between rounded-md bg-[#f8fafc] dark:bg-[#0b0f19] px-3 py-2">
+            <span className={`text-xs font-semibold ${SUB}`}>Max M_Ed / M_Rd (utilisation)</span>
+            <span className={`text-sm font-bold ${capacity.utilization_bending <= 1 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+              {Math.max(forces.max_sagging, forces.max_hogging)} kNm &nbsp;({capacity.utilization_bending})
+            </span>
+          </div>
+        </div>
+      </section>
+      <section className={CARD}>
+        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Bending Moment Diagram</h3></header>
+        <div className="p-4">
+          <BMD spans={spans} supports={supports} />
+          <Legend items={[["Hogging (\u2212)", HOG], ["Sagging (+)", SAG]]} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ShearTab({ data }) {
+  const { spans, supports, forces, capacity, shear_detail: shd } = data;
+  return (
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <section className={CARD}>
+        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Shear Design &mdash; Full Derivation (EC2 &sect;6.2.2)</h3></header>
+        <div className="p-4">
+          {shd ? (
+            <div className="space-y-1.5">
+              <DRow label="Steel ratio, \u03c1_l = A_s,prov(max)/(b\u00b7d)" value="\u2264 0.02" result={`\u03c1_l = ${shd.rho_l?.toFixed(5)}`} />
+              <DRow label="Size factor, k = 1+\u221a(200/d)" value="\u2264 2.0" result={`k = ${shd.k_factor?.toFixed(3)}`} />
+              <DRow label="C_Rd,c = 0.18/\u03b3_c" value="0.18/1.50" result={`${shd.C_Rdc?.toFixed(3)}`} />
+              <DRow label="v_min = 0.035\u00b7k^1.5\u00b7\u221af_ck" value="" result={`${shd.v_min_mpa?.toFixed(3)} MPa`} />
+              <DRow label="v_Ed = V_Ed(max)/(b\u00b7d)" value="" result={`${shd.v_ed_mpa?.toFixed(3)} MPa`} />
+              <DRow label="v_Rd,c = max(main term, v_min)" value="" result={`${shd.v_rdc_mpa?.toFixed(3)} MPa`} ok={shd.v_ed_mpa <= shd.v_rdc_mpa} />
+              <div className="mt-2 flex items-center justify-between rounded-md bg-[#f8fafc] dark:bg-[#0b0f19] px-3 py-2">
+                <span className={`text-xs font-semibold ${SUB}`}>V_Ed(max) / V_Rd,c</span>
+                <span className={`text-sm font-bold ${!shd.links_required ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
+                  {forces.max_shear} kN &nbsp;({shd.links_required ? "links required" : "min. links only"})
+                </span>
+              </div>
+              <p className={`mt-2 text-[11px] ${SUB}`}>One governing check for the whole member, using the maximum reinforcement provided anywhere and the peak shear demand -- matches the engine's actual simplification (a genuine per-support EC2 check would use each support's own A_s,provided).</p>
+            </div>
+          ) : (
+            <p className={`text-[12px] ${SUB}`}>Detailed shear derivation isn't available for this result yet -- re-run the design after updating the backend.</p>
+          )}
+        </div>
+      </section>
+      <section className={CARD}>
+        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Shear Force Diagram</h3></header>
+        <div className="p-4">
+          <SFD spans={spans} supports={supports} />
+          <Legend items={[["+ve", HOG], ["\u2212ve", SAG]]} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DeflectionTab({ data }) {
+  const { summary, sls, deflection_detail: dd } = data;
+  return (
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <section className={CARD}>
+        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Deflection Design &mdash; Full Derivation (EC2 &sect;7.4.2, two-stage)</h3></header>
+        <div className="p-4">
+          {dd ? (
+            <div className="space-y-1.5">
+              <DRow label="Governing span" value="highest sagging demand" result={dd.governing_span} />
+              <DRow label="Structural system factor, K" value="EC2 Table 7.4N (end vs interior span)" result={`K = ${dd.K_sys?.toFixed(2)}`} />
+              <DRow label="\u03c1 = A_s,req/(b\u00b7d)" value="" result={`\u03c1 = ${dd.rho?.toFixed(5)}`} />
+              <DRow label="\u03c1\u2080 = \u221af_ck/1000" value="" result={`\u03c1\u2080 = ${dd.rho0?.toFixed(5)}`} />
+              <DRow label="Branch" value={dd.rho <= dd.rho0 ? "\u03c1 \u2264 \u03c1\u2080" : "\u03c1 > \u03c1\u2080"} result={dd.rho <= dd.rho0 ? "lightly reinforced (A)" : "heavily reinforced (B)"} />
+              <DRow label="(L/d)_basic" value="EC2 \u00a77.4.2 formula" result={dd.ld_basic?.toFixed(2)} />
+              <DRow label="Base check (actual vs basic, before enhancement)" value="" result={dd.base_status} ok={dd.base_status === "PASS"} />
+              <DRow label="Enhancement factor, F3" value={dd.enhanced ? "base check failed \u2192 F3 = As,prov/As,req (\u22641.5)" : "base check already passes \u2014 not required"} result={`F3 = ${dd.F3?.toFixed(3)}`} />
+              <DRow label="Allowable (L/d) = basic \u00d7 F3" value="" result={sls.deflection_limit} />
+              <div className={`mt-2 flex items-center justify-between rounded-md px-3 py-2 ${sls.deflection_status === "PASS" ? "bg-green-50 dark:bg-green-900/20" : "bg-red-50 dark:bg-red-900/20"}`}>
+                <span className={`text-xs font-semibold ${SUB}`}>Actual L/d vs Allowable</span>
+                <span className={`text-sm font-bold ${sls.deflection_status === "PASS" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                  {sls.deflection_actual} / {sls.deflection_limit} &nbsp;({sls.deflection_status})
+                </span>
+              </div>
+            </div>
+          ) : (
+            <p className={`text-[12px] ${SUB}`}>Detailed deflection derivation isn't available for this result yet -- re-run the design after updating the backend.</p>
+          )}
+        </div>
+      </section>
+      <section className={CARD}>
+        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Deflected Shape</h3></header>
+        <div className="p-4">
+          <Defl lengths={summary.span_lengths} value={sls.deflection_actual} />
+        </div>
+      </section>
     </div>
   );
 }

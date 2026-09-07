@@ -5,6 +5,7 @@ import { LoadingProvider } from './contexts/LoadingContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { WorkspaceProvider } from './contexts/WorkspaceContext';
 import { NotificationProvider } from './contexts/NotificationContext';
+import { DesignMetaProvider } from './contexts/DesignMetaContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
 import SignUp from './pages/SignUp';
@@ -49,6 +50,7 @@ function App() {
         <LoadingProvider>
           <WorkspaceProvider>
             <NotificationProvider>
+              <DesignMetaProvider>
               <BrowserRouter>
                 <div className="min-h-screen w-full bg-white dark:bg-[#111827] transition-colors duration-300">
                   <Routes>
@@ -339,6 +341,7 @@ function App() {
                   </Routes>
                 </div>
               </BrowserRouter>
+              </DesignMetaProvider>
             </NotificationProvider>
           </WorkspaceProvider>
         </LoadingProvider>

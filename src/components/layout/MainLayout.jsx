@@ -5,19 +5,30 @@ import {
   FiGrid, FiLayers, FiBarChart2, FiColumns, FiSquare,
   FiTriangle, FiWind, FiDroplet, FiSettings, FiHelpCircle,
   FiSun, FiMoon, FiUser, FiLogOut, FiMenu, FiChevronLeft, FiChevronDown,
-  FiSave, FiDownload, FiShare2, FiArrowLeft, FiBell
+  FiArrowLeft, FiBell
 } from 'react-icons/fi';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useDesignMeta } from '../../contexts/DesignMetaContext';
 
-const MainLayout = ({ children, currentModule, breadcrumb, designCode = "EC2", analysisMethod = "Limit State", concreteGrade = "C30/37", steelGrade = "B500" }) => {
+const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisMethod, concreteGrade, steelGrade }) => {
   const { user, logout } = useAuth();
   const { isDarkMode, toggleDarkMode } = useTheme();
+  const { designMeta } = useDesignMeta();
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openMenus, setOpenMenus] = useState({ slab: true });
+
+  // Explicit props (if a route ever passes them) win; otherwise fall back
+  // to whatever the currently-loaded results page has published via
+  // DesignMetaContext, which is the actual live data instead of a fixed
+  // default every page silently shared before.
+  const effectiveDesignCode = designCode ?? designMeta.designCode;
+  const effectiveAnalysisMethod = analysisMethod ?? designMeta.analysisMethod;
+  const effectiveConcreteGrade = concreteGrade ?? designMeta.concreteGrade;
+  const effectiveSteelGrade = steelGrade ?? designMeta.steelGrade;
 
   // Navigation items - Engineering Tools Only
   const navItems = [
@@ -244,16 +255,6 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode = "EC2", a
                 )}
               </div>
               <div className="flex items-center space-x-2">
-                <button className="p-1.5 rounded-lg hover:bg-[#f3f4f6] dark:hover:bg-[#374151] transition-colors cursor-pointer" title="Save">
-                  <FiSave className="text-sm text-[#6b7280]" />
-                </button>
-                <button className="p-1.5 rounded-lg hover:bg-[#f3f4f6] dark:hover:bg-[#374151] transition-colors cursor-pointer" title="Export">
-                  <FiDownload className="text-sm text-[#6b7280]" />
-                </button>
-                <button className="p-1.5 rounded-lg hover:bg-[#f3f4f6] dark:hover:bg-[#374151] transition-colors cursor-pointer" title="Share">
-                  <FiShare2 className="text-sm text-[#6b7280]" />
-                </button>
-                <div className="w-px h-6 bg-[#e5e7eb] dark:bg-[#374151] mx-1"></div>
                 <button onClick={toggleDarkMode} className="p-1.5 rounded-lg hover:bg-[#f3f4f6] dark:hover:bg-[#374151] transition-colors cursor-pointer">
                   {isDarkMode ? <FiSun className="text-sm text-yellow-500" /> : <FiMoon className="text-sm text-[#0A2F44]" />}
                 </button>
@@ -271,12 +272,12 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode = "EC2", a
             <div className="flex flex-wrap items-center gap-4 text-xs">
               <div className="flex items-center space-x-2">
                 <span className="font-medium text-[#02090d] dark:text-white">Design Code:</span>
-                <span className="text-[#0A2F44] dark:text-[#66a4c2] font-mono">{designCode}</span>
+                <span className="text-[#0A2F44] dark:text-[#66a4c2] font-mono">{effectiveDesignCode}</span>
               </div>
               <div className="w-px h-3 bg-[#e5e7eb] dark:bg-[#374151]"></div>
               <div className="flex items-center space-x-2">
                 <span className="font-medium text-[#02090d] dark:text-white">Analysis:</span>
-                <span className="text-[#6b7280] dark:text-[#9ca3af]">{analysisMethod}</span>
+                <span className="text-[#6b7280] dark:text-[#9ca3af]">{effectiveAnalysisMethod}</span>
               </div>
               <div className="w-px h-3 bg-[#e5e7eb] dark:bg-[#374151]"></div>
               <div className="flex items-center space-x-2">
@@ -286,12 +287,12 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode = "EC2", a
               <div className="w-px h-3 bg-[#e5e7eb] dark:bg-[#374151]"></div>
               <div className="flex items-center space-x-2">
                 <span className="font-medium text-[#02090d] dark:text-white">Concrete:</span>
-                <span className="text-[#6b7280] dark:text-[#9ca3af]">{concreteGrade}</span>
+                <span className="text-[#6b7280] dark:text-[#9ca3af]">{effectiveConcreteGrade}</span>
               </div>
               <div className="w-px h-3 bg-[#e5e7eb] dark:bg-[#374151]"></div>
               <div className="flex items-center space-x-2">
                 <span className="font-medium text-[#02090d] dark:text-white">Steel:</span>
-                <span className="text-[#6b7280] dark:text-[#9ca3af]">{steelGrade}</span>
+                <span className="text-[#6b7280] dark:text-[#9ca3af]">{effectiveSteelGrade}</span>
               </div>
             </div>
           </div>

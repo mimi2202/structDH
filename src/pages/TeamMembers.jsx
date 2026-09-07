@@ -1,41 +1,52 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { 
-  FiUsers, FiPlus, FiMail, FiUserPlus, FiShield,
-  FiTrash2, FiEdit2, FiMoreVertical
-} from 'react-icons/fi';
-import { useWorkspace } from '../contexts/WorkspaceContext';
+import React, { useState, useEffect } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import {
+  FiUsers,
+  FiPlus,
+  FiMail,
+  FiUserPlus,
+  FiShield,
+  FiTrash2,
+  FiEdit2,
+  FiMoreVertical,
+} from 'react-icons/fi'
+import { useWorkspace } from '../contexts/WorkspaceContext'
 
 const TeamMembers = () => {
-  const { workspaceId } = useParams();
-  const { members, loading, loadMembers, inviteMember, removeMember, updateMemberRole } = useWorkspace();
-  const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('member');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { workspaceId } = useParams()
+  const { members, loading, loadMembers, inviteMember, removeMember, updateMemberRole } =
+    useWorkspace()
+  const [showInviteModal, setShowInviteModal] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState('member')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
-    loadMembers(workspaceId);
-  }, [workspaceId]);
+    loadMembers(workspaceId)
+  }, [workspaceId])
 
   const handleInvite = async (e) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    await inviteMember(workspaceId, inviteEmail, inviteRole);
-    setShowInviteModal(false);
-    setInviteEmail('');
-    setInviteRole('member');
-    setIsSubmitting(false);
-  };
+    e.preventDefault()
+    setIsSubmitting(true)
+    await inviteMember(workspaceId, inviteEmail, inviteRole)
+    setShowInviteModal(false)
+    setInviteEmail('')
+    setInviteRole('member')
+    setIsSubmitting(false)
+  }
 
   const getRoleBadgeColor = (role) => {
-    switch(role) {
-      case 'owner': return 'bg-purple-100 text-purple-700';
-      case 'admin': return 'bg-blue-100 text-blue-700';
-      case 'member': return 'bg-green-100 text-green-700';
-      default: return 'bg-gray-100 text-gray-700';
+    switch (role) {
+      case 'owner':
+        return 'bg-purple-100 text-purple-700'
+      case 'admin':
+        return 'bg-blue-100 text-blue-700'
+      case 'member':
+        return 'bg-green-100 text-green-700'
+      default:
+        return 'bg-gray-100 text-gray-700'
     }
-  };
+  }
 
   if (loading) {
     return (
@@ -47,7 +58,7 @@ const TeamMembers = () => {
           <p className="text-[#6b7280]">Loading team members...</p>
         </div>
       </div>
-    );
+    )
   }
 
   return (
@@ -80,16 +91,29 @@ const TeamMembers = () => {
             <table className="w-full">
               <thead className="bg-[#f9fafb] dark:bg-[#374151] border-b border-[#e5e7eb] dark:border-[#4b5563]">
                 <tr>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">Member</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">Role</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">Joined</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">Status</th>
-                  <th className="text-right px-6 py-4 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">Actions</th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">
+                    Member
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">
+                    Role
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">
+                    Joined
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="text-right px-6 py-4 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#e5e7eb] dark:divide-[#374151]">
                 {members.map((member) => (
-                  <tr key={member.id} className="hover:bg-[#f9fafb] dark:hover:bg-[#374151] transition-colors">
+                  <tr
+                    key={member.id}
+                    className="hover:bg-[#f9fafb] dark:hover:bg-[#374151] transition-colors"
+                  >
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 bg-[#e6f0f5] dark:bg-[#1e3a4a] rounded-full flex items-center justify-center">
@@ -98,13 +122,19 @@ const TeamMembers = () => {
                           </span>
                         </div>
                         <div>
-                          <p className="font-medium text-[#02090d] dark:text-white">{member.name}</p>
-                          <p className="text-sm text-[#6b7280] dark:text-[#9ca3af]">{member.email}</p>
+                          <p className="font-medium text-[#02090d] dark:text-white">
+                            {member.name}
+                          </p>
+                          <p className="text-sm text-[#6b7280] dark:text-[#9ca3af]">
+                            {member.email}
+                          </p>
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getRoleBadgeColor(member.role)}`}>
+                      <span
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getRoleBadgeColor(member.role)}`}
+                      >
                         {member.role === 'owner' && <FiShield className="mr-1" />}
                         {member.role}
                       </span>
@@ -139,7 +169,9 @@ const TeamMembers = () => {
 
         {/* Invite Link Section */}
         <div className="mt-8 bg-white dark:bg-[#1f2937] rounded-xl shadow-lg p-6 border border-[#e5e7eb] dark:border-[#374151]">
-          <h3 className="text-lg font-semibold text-[#02090d] dark:text-white mb-4">Share Invite Link</h3>
+          <h3 className="text-lg font-semibold text-[#02090d] dark:text-white mb-4">
+            Share Invite Link
+          </h3>
           <p className="text-sm text-[#6b7280] dark:text-[#9ca3af] mb-4">
             Anyone with this link can join this workspace
           </p>
@@ -161,7 +193,9 @@ const TeamMembers = () => {
       {showInviteModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-[#1f2937] rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold text-[#02090d] dark:text-white mb-4">Invite Team Member</h3>
+            <h3 className="text-lg font-semibold text-[#02090d] dark:text-white mb-4">
+              Invite Team Member
+            </h3>
             <form onSubmit={handleInvite}>
               <div className="space-y-4">
                 <div>
@@ -213,7 +247,7 @@ const TeamMembers = () => {
         </div>
       )}
     </div>
-  );
-};
+  )
+}
 
-export default TeamMembers;
+export default TeamMembers

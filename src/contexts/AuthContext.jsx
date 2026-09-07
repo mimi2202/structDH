@@ -15,7 +15,7 @@ const AuthContext = createContext();
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [personalOrganization, setPersonalOrganization] = useState(null);
 
@@ -33,6 +33,7 @@ export const AuthProvider = ({ children }) => {
         setPersonalOrganization(JSON.parse(savedPersonalOrg));
       }
     }
+    setLoading(false);
     console.log('Auth initialized');
   }, []);
 

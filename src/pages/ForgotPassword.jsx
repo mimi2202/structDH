@@ -1,19 +1,19 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
-import { yupResolver } from '@hookform/resolvers/yup';
-import { FiArrowLeft, FiMail, FiCheckCircle, FiSun, FiMoon } from 'react-icons/fi';
-import { useTheme } from '../contexts/ThemeContext';
-import { useAuth } from '../contexts/AuthContext';
-import { forgotPasswordSchema } from '../utils/validation';
+import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
+import { yupResolver } from '@hookform/resolvers/yup'
+import { FiArrowLeft, FiMail, FiCheckCircle, FiSun, FiMoon } from 'react-icons/fi'
+import { useTheme } from '../contexts/ThemeContext'
+import { useAuth } from '../contexts/AuthContext'
+import { forgotPasswordSchema } from '../utils/validation'
 
 const ForgotPassword = () => {
-  const [emailSent, setEmailSent] = useState(false);
-  const [submittedEmail, setSubmittedEmail] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [serverError, setServerError] = useState('');
-  const { isDarkMode, toggleDarkMode } = useTheme();
-  const { forgotPassword } = useAuth();
+  const [emailSent, setEmailSent] = useState(false)
+  const [submittedEmail, setSubmittedEmail] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [serverError, setServerError] = useState('')
+  const { isDarkMode, toggleDarkMode } = useTheme()
+  const { forgotPassword } = useAuth()
 
   const {
     register,
@@ -21,26 +21,26 @@ const ForgotPassword = () => {
     formState: { errors },
   } = useForm({
     resolver: yupResolver(forgotPasswordSchema),
-  });
+  })
 
   const onSubmit = async (data) => {
-    setIsSubmitting(true);
-    setServerError('');
-    
-    const result = await forgotPassword(data.email);
-    
+    setIsSubmitting(true)
+    setServerError('')
+
+    const result = await forgotPassword(data.email)
+
     if (result.success) {
-      setSubmittedEmail(data.email);
-      setEmailSent(true);
+      setSubmittedEmail(data.email)
+      setEmailSent(true)
     } else {
-      setServerError(result.error);
+      setServerError(result.error)
     }
-    
-    setIsSubmitting(false);
-  };
+
+    setIsSubmitting(false)
+  }
 
   return (
-    <div 
+    <div
       className="min-h-screen w-full flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 transition-colors duration-300"
       style={{ backgroundColor: 'var(--bg-primary)' }}
     >
@@ -48,10 +48,10 @@ const ForgotPassword = () => {
       <button
         onClick={toggleDarkMode}
         className="absolute top-4 right-4 p-3 rounded-lg shadow-lg hover:shadow-xl transition-all z-10 cursor-pointer"
-        style={{ 
+        style={{
           backgroundColor: 'var(--bg-card)',
           color: 'var(--text-primary)',
-          border: '1px solid var(--border-color)'
+          border: '1px solid var(--border-color)',
         }}
         aria-label="Toggle theme"
       >
@@ -62,24 +62,24 @@ const ForgotPassword = () => {
         )}
       </button>
 
-      <div 
+      <div
         className="p-8 rounded-xl shadow-lg max-w-md w-full transition-colors duration-300"
-        style={{ 
+        style={{
           backgroundColor: 'var(--bg-card)',
-          border: `1px solid var(--border-color)`
+          border: `1px solid var(--border-color)`,
         }}
       >
         {/* Back to login link */}
-        <Link 
-          to="/login" 
+        <Link
+          to="/login"
           className="inline-flex items-center text-sm hover:underline mb-6 transition-colors duration-300"
           style={{ color: 'var(--accent)' }}
         >
           <FiArrowLeft className="mr-2" /> Back to login
         </Link>
-        
+
         <div className="text-center mb-8">
-          <div 
+          <div
             className="w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4"
             style={{ backgroundColor: '#0A2F44' }}
           >
@@ -89,9 +89,9 @@ const ForgotPassword = () => {
             Reset your password
           </h1>
           <p className="mt-2" style={{ color: 'var(--text-secondary)' }}>
-            {emailSent 
-              ? 'Check your email for reset instructions' 
-              : 'Enter your email and we\'ll send you a reset link'}
+            {emailSent
+              ? 'Check your email for reset instructions'
+              : "Enter your email and we'll send you a reset link"}
           </p>
         </div>
 
@@ -101,18 +101,22 @@ const ForgotPassword = () => {
             {serverError}
           </div>
         )}
-        
+
         {emailSent ? (
           /* Success state */
           <div className="text-center py-6">
             <div className="w-16 h-16 bg-[#e8f5e9] dark:bg-[#1e3a4a] rounded-full flex items-center justify-center mx-auto mb-4">
               <FiCheckCircle className="text-3xl" style={{ color: 'var(--accent)' }} />
             </div>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>We've sent an email to:</p>
-            <p className="font-semibold mt-1" style={{ color: 'var(--accent)' }}>{submittedEmail}</p>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              We've sent an email to:
+            </p>
+            <p className="font-semibold mt-1" style={{ color: 'var(--accent)' }}>
+              {submittedEmail}
+            </p>
             <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
               Didn't receive it?{' '}
-              <button 
+              <button
                 onClick={() => setEmailSent(false)}
                 className="font-medium hover:underline"
                 style={{ color: 'var(--accent)' }}
@@ -126,23 +130,23 @@ const ForgotPassword = () => {
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             {/* Email Field */}
             <div className="relative">
-              <FiMail className="absolute left-3 top-1/2 transform -translate-y-1/2" 
-                      style={{ color: 'var(--text-muted)' }} />
+              <FiMail
+                className="absolute left-3 top-1/2 transform -translate-y-1/2"
+                style={{ color: 'var(--text-muted)' }}
+              />
               <input
                 type="email"
                 {...register('email')}
                 placeholder="Email address"
                 className="w-full pl-10 pr-4 py-3 rounded-lg transition-colors duration-300"
-                style={{ 
+                style={{
                   backgroundColor: 'var(--bg-primary)',
                   border: `1px solid ${errors.email ? '#ef4444' : 'var(--border-color)'}`,
-                  color: 'var(--text-primary)'
+                  color: 'var(--text-primary)',
                 }}
               />
             </div>
-            {errors.email && (
-              <p className="text-sm text-red-500 mt-1">{errors.email.message}</p>
-            )}
+            {errors.email && <p className="text-sm text-red-500 mt-1">{errors.email.message}</p>}
 
             {/* Submit Button */}
             <button
@@ -155,11 +159,11 @@ const ForgotPassword = () => {
             </button>
           </form>
         )}
-        
+
         <p className="text-center text-sm mt-6" style={{ color: 'var(--text-muted)' }}>
           Remember your password?{' '}
-          <Link 
-            to="/login" 
+          <Link
+            to="/login"
             className="font-medium hover:underline transition-all duration-200"
             style={{ color: 'var(--accent)' }}
           >
@@ -168,7 +172,7 @@ const ForgotPassword = () => {
         </p>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default ForgotPassword;
+export default ForgotPassword

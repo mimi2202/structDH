@@ -1,12 +1,42 @@
 # backend/services/beam_service.py
+#
+# Wired into the validated beam_ss_engine.py -- this service no longer
+# duplicates flexure/shear/deflection logic inline. It translates the live
+# BeamDesignRequest into the engine's inputs (computing the correct MEd/VEd
+# for whichever support condition was requested, since the engine's native
+# wL^2/8 formula only covers true simply-supported beams), calls the
+# engine for the validated section design, and maps the result into the
+# existing BeamDesignResult contract so BeamResults.jsx is unaffected.
 import re
 import math
 from models.beam_schemas import (
     BeamDesignRequest, BeamDesignResult, BeamSummary, BeamMaterialsOut,
     BeamLoadSummary, BeamForces, BeamCapacity, BeamReinforcement, BeamSLS,
+    BeamFlexureDetail, BeamShearDetail, BeamDeflectionDetail,
+    ReportRow, ReportSection,
 )
+from engine.beam_ss_engine import BeamInput, design_ss_beam
 
 PI = math.pi
+
+# EC2 Table 7.4N structural system factor K -- same convention already
+# established for the slab engines: 1.0 simply supported / 1.3 end span
+# (one end continuous) / 1.5 interior span (both ends continuous) / 0.4
+# cantilever.
+DEFLECTION_K = {
+    "both_ends_simply_supported": 1.0,
+    "both_ends_fixed": 1.5,
+    "one_fixed_one_simple": 1.3,
+    "one_fixed_one_free": 0.4,
+}
+
+# moment / shear coefficients:  M = cM * w * L^2 ,  V = cV * w * L
+SUPPORT_COEFFS = {
+    "both_ends_simply_supported": (1 / 8, 1 / 2, "Simply Supported"),
+    "both_ends_fixed": (1 / 12, 1 / 2, "Both Ends Fixed"),
+    "one_fixed_one_simple": (1 / 8, 5 / 8, "Propped Cantilever"),
+    "one_fixed_one_free": (1 / 2, 1.0, "Cantilever"),
+}
 
 
 def _enum(v):
@@ -26,42 +56,6 @@ def parse_fy(grade):
     return float(m.group(1)) if m else 500.0
 
 
-# moment / shear coefficients:  M = cM * w * L^2 ,  V = cV * w * L
-SUPPORT_COEFFS = {
-    "both_ends_simply_supported": (1 / 8, 1 / 2, "Simply Supported"),
-    "both_ends_fixed": (1 / 12, 1 / 2, "Both Ends Fixed"),
-    "one_fixed_one_simple": (1 / 8, 5 / 8, "Propped Cantilever"),
-    "one_fixed_one_free": (1 / 2, 1.0, "Cantilever"),
-}
-
-
-def pick_bars(as_req, dias):
-    """Choose bar count/diameter for a beam (prefers 2-6 bars)."""
-    fallback = None
-    for dia in sorted(dias):
-        area = PI / 4 * dia ** 2
-        n = max(2, math.ceil(as_req / area))
-        opt = {"count": n, "bar_diameter": dia, "area_provided": round(n * area, 0)}
-        if fallback is None:
-            fallback = opt
-        if 2 <= n <= 6:
-            return opt
-    return fallback
-
-
-def _effective_flange_width(g, L_m, bw_mm):
-    """EC2 Cl. 5.3.2.1 effective flange width for a simply-supported T-beam.
-    Returns bw when no adjacent spacings are supplied (rectangular fallback)."""
-    left = getattr(g, "left_adjacent_spacing", 0) or 0
-    right = getattr(g, "right_adjacent_spacing", 0) or 0
-    if left <= 0 and right <= 0:
-        return bw_mm, False                       # rectangular (unchanged behaviour)
-    l0 = 0.85 * L_m * 1000.0                       # simply-supported: l0 = 0.85 L (mm)
-    beff1 = min(0.2 * l0, left / 2.0) if left > 0 else 0.0
-    beff2 = min(0.2 * l0, right / 2.0) if right > 0 else 0.0
-    return bw_mm + beff1 + beff2, True
-
-
 def calculate_beam_design(request: BeamDesignRequest) -> BeamDesignResult:
     code = _enum(request.design_code)
     is_bs = code == "BS8110"
@@ -70,14 +64,17 @@ def calculate_beam_design(request: BeamDesignRequest) -> BeamDesignResult:
 
     g = request.geometry
     b, h = g.width, g.depth
-    cover = g.effective_cover
+    cover_input = g.effective_cover
     L = g.span / 1000.0  # m
 
     fck = parse_fck(request.materials.concrete_grade)
     fy = parse_fy(request.materials.steel_grade)
     link = request.link_diameter
 
-    # ---- loads (kN/m) ----
+    # ---- loads (kN/m) -- this stays here: translating the live schema's
+    # direct kN/m load fields into a total factored UDL is a request-shape
+    # concern, not something the (support-condition-agnostic) engine should
+    # need to know about. ----
     self_w = (b / 1000.0) * (h / 1000.0) * request.materials.unit_weight_concrete if request.loads.self_weight_auto else 0.0
     comps = [
         {"name": "Beam Self Weight", "kind": "DL", "value": round(self_w, 2)},
@@ -98,129 +95,109 @@ def calculate_beam_design(request: BeamDesignRequest) -> BeamDesignResult:
         w_d = 1.35 * gk + 1.5 * qk
         combo = "1.35 Gk + 1.50 Qk (EN 1990)"
 
+    # ---- actions: correct coefficients for whichever support condition
+    # was requested -- the engine's native wL^2/8 only covers true
+    # simply-supported beams, so this is computed here and handed to the
+    # engine as an override. ----
     cM, cV, support_label = SUPPORT_COEFFS.get(support, SUPPORT_COEFFS["both_ends_simply_supported"])
     m_ed = cM * w_d * L ** 2   # kNm
     v_ed = cV * w_d * L        # kN
+    K_sys = DEFLECTION_K.get(support, 1.0)
 
-    # ---- effective flange (T-beam) -- beff = bw when no spacings given ----
-    beff, is_tbeam = _effective_flange_width(g, L, b)
+    # ---- run the validated engine for section design ----
+    eng_in = BeamInput(
+        span_m=L, bw_mm=b, h_mm=h,
+        slab_thickness_mm=g.slab_thickness, cover_mm=cover_input,
+        link_dia_mm=link, fck=fck, fyk=fy, code="BS8110" if is_bs else "EC2",
+        bar_diameters=tuple(request.bar_diameters),
+        left_adjacent_spacing_m=(g.left_adjacent_spacing or 0) / 1000.0,
+        right_adjacent_spacing_m=(g.right_adjacent_spacing or 0) / 1000.0,
+        w_override_kN_m=w_d, MEd_override_kNm=m_ed, VEd_override_kN=v_ed,
+        deflection_K_override=K_sys,
+    )
+    r = design_ss_beam(eng_in)
 
-    # ---- flexure (user's script method: K/0.9 lever arm, 0.87 fyk) ----
-    d0 = h - cover - link - 10  # first guess (assume 20mm bar)
-    if is_bs:
-        fcu = fck
-        K = min(m_ed * 1e6 / (beff * d0 ** 2 * fcu), 0.156)
-        z = min(d0 * (0.5 + (max(0.25 - K / 0.9, 0)) ** 0.5), 0.95 * d0)
-        as_req = m_ed * 1e6 / (0.95 * fy * z)
-        fcd = 0.45 * fcu
-        fyd = 0.95 * fy
-    else:
-        fcd = fck / 1.5
-        fyd = fy / 1.15
-        K = m_ed * 1e6 / (beff * d0 ** 2 * fck)
-        z = min(d0 * (0.5 + (max(0.25 - K / 0.9, 0)) ** 0.5), 0.95 * d0)   # K/0.9 per script
-        as_req = m_ed * 1e6 / (0.87 * fy * z)                              # 0.87 fyk per script
+    fl, sh, defl, act, geo = r["flexure"], r["shear"], r["deflection"], r["actions"], r["geometry"]
+    fcd = fck / 1.5 if not is_bs else 0.45 * fck
+    fyd = fy / 1.15 if not is_bs else 0.95 * fy
+    d = geo["d_eff_mm"]
+    z = fl["z_mm"]
+    beff = geo["beff_mm"]
+    as_prov = fl["As_provided_mm2"]
+    as_req = fl["As_req_mm2"]
+    m_rd = (0.95 if is_bs else 0.87) * fy * as_prov * z / 1e6
+    util_bend = act["MEd_kNm"] / m_rd if m_rd else 0
+    v_rdc_kN = sh["VRdc_kN"]
+    util_shear = act["VEd_kN"] / v_rdc_kN if v_rdc_kN else 0
 
-    # min/max steel (min based on web width bw, per script)
-    if is_bs:
-        as_min = 0.0013 * b * h
-    else:
-        fctm = 0.3 * fck ** (2 / 3) if fck <= 50 else 2.12
-        as_min = max(0.26 * fctm / fy * b * d0, 0.0013 * b * d0)
-    as_req = max(as_req, as_min)
-
-    bars = pick_bars(as_req, request.bar_diameters)
-    d = h - cover - link - bars["bar_diameter"] / 2  # refined effective depth
-    # recompute z & resistance with refined d (on beff)
-    if is_bs:
-        K = min(m_ed * 1e6 / (beff * d ** 2 * fck), 0.156)
-        z = min(d * (0.5 + (max(0.25 - K / 0.9, 0)) ** 0.5), 0.95 * d)
-        m_rd = 0.95 * fy * bars["area_provided"] * z / 1e6
-    else:
-        K = m_ed * 1e6 / (beff * d ** 2 * fck)
-        z = min(d * (0.5 + (max(0.25 - K / 0.9, 0)) ** 0.5), 0.95 * d)
-        m_rd = 0.87 * fy * bars["area_provided"] * z / 1e6
-    util_bend = m_ed / m_rd if m_rd else 0
-
-    # nominal compression / hanger steel: 2 x smallest bar
+    n_bar, dia = int(fl["bars"].split("Y")[0]), int(fl["bars"].split("Y")[1])
     comp_dia = min(request.bar_diameters)
     comp_area = 2 * PI / 4 * comp_dia ** 2
+    link_spacing = int(round(sh["s_max_mm"] if act["VEd_kN"] * 1000 <= v_rdc_kN * 1000 else min(sh["s_req_mm"], sh["s_max_mm"])))
+    link_spacing = max(75, (link_spacing // 25) * 25)
 
-    # ---- shear (unchanged; web width bw) ----
-    as_prov = bars["area_provided"]
-    rho = min(as_prov / (b * d), 0.02 if not is_bs else 0.03)
-    v_ed_n = v_ed * 1000.0  # N
-    if is_bs:
-        fcu_f = min(fck, 40) / 25.0
-        vc = 0.79 * (100 * rho) ** (1 / 3) * (400 / d) ** 0.25 / 1.25 * fcu_f ** (1 / 3)
-        v_rdc = vc * b * d  # N
-    else:
-        kf = min(2.0, 1 + (200 / d) ** 0.5)
-        v_min = 0.035 * kf ** 1.5 * fck ** 0.5
-        v_rdc = max(0.12 * kf * (100 * rho * fck) ** (1 / 3), v_min) * b * d  # N
-    util_shear = v_ed_n / v_rdc if v_rdc else 0
-
-    asw = 2 * PI / 4 * link ** 2  # 2-leg area
-    if v_ed_n <= v_rdc:
-        link_spacing = int(min(0.75 * d, 300) // 25 * 25)
-    else:
-        fywd = (0.95 * fy) if is_bs else (fy / 1.15)
-        s = asw * z * fywd / (v_ed_n)  # cot(theta) = 1
-        link_spacing = max(75, int(min(s, 0.75 * d, 300) // 25 * 25))
-
-    # ---- SLS: deflection (short-term, gross section) -- unchanged ----
-    Ecm = 22000 * ((fck + 8) / 10) ** 0.3 if not is_bs else 24000  # N/mm^2
-    I_gross = b * h ** 3 / 12.0
-    w_sls = service  # N/mm  (1 kN/m == 1 N/mm)
-    span_mm = g.span
-    if support == "one_fixed_one_free":  # cantilever
-        defl = w_sls * span_mm ** 4 / (8 * Ecm * I_gross)
-    elif support == "both_ends_fixed":
-        defl = w_sls * span_mm ** 4 / (384 * Ecm * I_gross)
-    else:
-        defl = 5 * w_sls * span_mm ** 4 / (384 * Ecm * I_gross)
-    defl_limit = span_mm / 250.0
-    defl_status = "PASS" if defl <= defl_limit else "FAIL"
-
-    # ---- SLS: crack width (simplified EC2 7.3.4) -- unchanged ----
+    # ---- SLS: crack width (simplified EC2 7.3.4) -- beam-specific, no
+    # slab equivalent, kept here rather than in the engine ----
+    Ecm = 22000 * ((fck + 8) / 10) ** 0.3 if not is_bs else 24000
     Es = 200000.0
     psi2 = 0.3
-    m_qp = cM * (gk + psi2 * qk) * L ** 2  # quasi-permanent moment, kNm
+    m_qp = cM * (gk + psi2 * qk) * L ** 2
     sigma_s = (m_qp * 1e6) / (as_prov * z) if (as_prov and z) else 0
-    fct_eff = 0.3 * fck ** (2 / 3) if fck <= 50 else 2.9
+    fct_eff = 0.3 * fck ** (2 / 3) if fck <= 50 else 2.12 * math.log(1 + (fck + 8) / 10)
     ac_eff = b * min(2.5 * (h - d), h / 2)
     rho_eff = as_prov / ac_eff if ac_eff else 0.01
     alpha_e = Es / Ecm
-    phi = bars["bar_diameter"]
-    sr_max = 3.4 * cover + 0.425 * 0.8 * 0.5 * phi / rho_eff if rho_eff else 0
+    phi = dia
+    cover_used = geo["cover_mm"]
+    sr_max = 3.4 * cover_used + 0.425 * 0.8 * 0.5 * phi / rho_eff if rho_eff else 0
     eps = max((sigma_s - 0.4 * fct_eff / rho_eff * (1 + alpha_e * rho_eff)) / Es, 0.6 * sigma_s / Es) if rho_eff else 0
     crack = sr_max * eps
     crack_limit = 0.30
     crack_status = "PASS" if crack <= crack_limit else "FAIL"
 
-    overall = "PASS" if (util_bend <= 1 and util_shear <= 1 and defl_status == "PASS" and crack_status == "PASS") else "FAIL"
+    defl_status = "PASS" if defl["status"] == "OK" else "FAIL"
+    # Shear PASS/FAIL now defers to the engine's own check (shear_ok OR an
+    # achievable link spacing exists) instead of independently requiring
+    # util_shear<=1 here. Needing shear links is routine, expected design --
+    # util_shear>1 on its own does not mean the beam fails, only that
+    # concrete alone isn't sufficient and links are required, which the
+    # engine already designs for. util_shear itself is unchanged below; it's
+    # still reported as a genuine utilisation figure, just no longer used as
+    # a strict pass/fail gate on its own.
+    shear_status_ok = bool(r.get("checks", {}).get("shear", util_shear <= 1))
+    overall = "PASS" if (util_bend <= 1 and shear_status_ok and defl_status == "PASS" and crack_status == "PASS") else "FAIL"
     code_label = "BS 8110:1997" if is_bs else ("ACI 318" if code == "ACI318" else "EN 1992-1-1 (EC2)")
 
     section_note = (
         f"Flexure designed as T-beam: beff = {round(beff)} mm (EC2 Cl. 5.3.2.1)."
-        if is_tbeam else
+        if beff > b else
         "Flexure designed as rectangular section (no adjacent spacings entered)."
     )
     notes = [
         f"Design in accordance with {code_label}.",
         section_note,
-        "Lever arm z = d[0.5 + sqrt(0.25 - K/0.9)]; As = M/(0.87 fyk z).",
+        "Section design (flexure/shear/deflection) performed by the validated beam_ss_engine, driven with actions computed here for the selected support condition.",
+        "EC2 lever arm z = d[0.5 + sqrt(0.25 - K/1.134)]; As = M/(0.87 fyk z)." if not is_bs else
+        "BS8110 lever arm z = d[0.5 + sqrt(0.25 - K/0.9)]; As = M/(0.95 fyk z).",
+        "Cover used = clear cover input + 5 mm fixed detailing tolerance (not user-editable), matching the slab engines.",
+        "Deflection: EC2 §7.4.2 span/effective-depth ratio, two-stage (F3 only if the base ratio fails), matching the slab engines.",
         "Design UDL includes beam self-weight." if request.loads.self_weight_auto else "Self-weight excluded by user.",
-        "Deflection is short-term on the gross (uncracked) section; long-term values will be higher.",
         "Crack width is a simplified EC2 7.3.4 estimate (quasi-permanent, psi2 = 0.3).",
         "Dimensions in mm; forces in kN and kNm.",
+    ]
+
+    report = [
+        ReportSection(title=sec["section"],
+                      rows=[ReportRow(reference=row["ref"], calculation=row["calc"], output=row["out"])
+                            for row in sec["rows"]])
+        for sec in r.get("report", [])
     ]
 
     return BeamDesignResult(
         summary=BeamSummary(
             beam_id=request.beam_id, support_condition=support_label,
             top_restraint=restraint.replace("_", " ").title(),
-            span=g.span, width=b, depth=h, effective_depth=round(d, 1), effective_cover=cover,
+            span=g.span, width=b, depth=h, effective_depth=round(d, 1), effective_cover=round(cover_used, 1),
             concrete_grade=request.materials.concrete_grade, steel_grade=request.materials.steel_grade,
             design_code=code_label, analysis="Elastic (Linear)", status=overall,
         ),
@@ -232,25 +209,41 @@ def calculate_beam_design(request: BeamDesignRequest) -> BeamDesignResult:
             components=comps, total_dead=round(gk, 2), total_live=round(qk, 2), total_service=round(service, 2),
         ),
         forces=BeamForces(
-            design_udl=round(w_d, 2), max_moment=round(m_ed, 2), max_shear=round(v_ed, 2), ultimate_combo=combo,
+            design_udl=round(w_d, 2), max_moment=round(act["MEd_kNm"], 2), max_shear=round(act["VEd_kN"], 2), ultimate_combo=combo,
         ),
         capacity=BeamCapacity(
-            moment_resistance=round(m_rd, 2), shear_resistance=round(v_rdc / 1000, 2),
+            moment_resistance=round(m_rd, 2), shear_resistance=round(v_rdc_kN, 2),
             utilization_bending=round(util_bend, 2), utilization_shear=round(util_shear, 2),
         ),
         reinforcement=BeamReinforcement(
-            tension={"count": bars["count"], "bar_diameter": bars["bar_diameter"],
+            tension={"count": n_bar, "bar_diameter": dia,
                      "area_required": round(as_req, 0), "area_provided": round(as_prov, 0),
-                     "label": f"{bars['count']}T{bars['bar_diameter']}"},
+                     "label": f"{n_bar}T{dia}"},
             compression={"count": 2, "bar_diameter": comp_dia, "area_provided": round(comp_area, 0),
                          "label": f"2T{comp_dia}"},
             stirrups={"bar_diameter": link, "spacing": link_spacing, "legs": 2,
                       "label": f"\u00d8{link} @ {link_spacing} mm c/c"},
-            cover=cover,
+            cover=round(cover_used, 1),
         ),
         sls=BeamSLS(
-            deflection_actual=round(defl, 1), deflection_limit=round(defl_limit, 1), deflection_status=defl_status,
+            deflection_actual=round(defl["actual_Ld"], 2), deflection_limit=round(defl["allowable_Ld"], 2), deflection_status=defl_status,
             crack_width=round(crack, 2), crack_limit=crack_limit, crack_status=crack_status,
         ),
+        flexure_detail=BeamFlexureDetail(
+            K=fl["K"], K_balanced=fl["K_balanced"], z_mm=fl["z_mm"], beff_mm=fl["beff_mm"],
+            is_t_beam=fl["beff_mm"] > b, neutral_axis_mm=fl["x_mm"],
+            neutral_axis_in_flange=fl["neutral_axis_in_flange"], as_min_mm2=fl["As_min_mm2"],
+        ),
+        shear_detail=BeamShearDetail(
+            rho_l=sh["rho_l"], k_factor=sh["k"], C_Rdc=sh["C_Rdc"], v_min_mpa=sh["v_min_mpa"],
+            v_rdc_mpa=round(v_rdc_kN * 1000 / (b * d), 3) if (b * d) else 0,
+            v_ed_mpa=round(act["VEd_kN"] * 1000 / (b * d), 3) if (b * d) else 0,
+            links_required=sh["links_required"],
+        ),
+        deflection_detail=BeamDeflectionDetail(
+            rho=defl["rho"], rho0=defl["rho0"], K_sys=defl["K_sys"], ld_basic=defl["ld_basic"],
+            base_status=defl["base_status"], F3=defl["F3"], enhanced=defl["enhanced"],
+        ),
         notes=notes,
+        report=report,
     )

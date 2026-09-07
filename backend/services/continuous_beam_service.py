@@ -15,6 +15,10 @@ from engine.beam_cont_engine import ContinuousBeamInput, design_continuous_beam
 
 PI = math.pi
 
+# Fallback bar diameters if the request doesn't carry a bar_diameters field
+# yet (ContinuousBeamRequest may not expose one -- see note at bottom of file).
+DEFAULT_BAR_DIAMETERS = [16, 20, 25, 32]
+
 
 def _enum(v):
     return v.value if hasattr(v, "value") else v
@@ -47,6 +51,12 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
     b, h, cover = g.width, g.depth, g.cover
     link = request.link_diameter
 
+    # Bar diameters: respect the user's preferred order (main bar first),
+    # matching the slab engines' convention. ContinuousBeamRequest already
+    # exposes bar_diameters (default [16,20,25,32]); the "or" here just
+    # guards against an empty list ever being sent.
+    bar_diameters = request.bar_diameters or DEFAULT_BAR_DIAMETERS
+
     gamma_g = 1.35 if not is_bs else 1.4
     gamma_q = 1.50 if not is_bs else 1.6
     combo = "1.35 Gk + 1.50 Qk (EN 1990)" if not is_bs else "1.4 Gk + 1.6 Qk (BS 8110)"
@@ -70,17 +80,24 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
         span_service.append(gk + qk)
         span_udls.append(gamma_g * gk + gamma_q * qk)
 
-    d_eff = g.effective_depth or (h - cover - link - 20 / 2)
-
     eng_in = ContinuousBeamInput(
         spans_m=[L / 1000.0 for L in lengths],
         slab_areas_m2=[1.0] * n,
         bw_mm=b, h_mm=h, cover_mm=cover, link_dia_mm=link,
         assumed_main_bar_mm=20.0, fck=fck, fyk=fy,
         Ecm_Nmm2=(22000 * ((fck + 8) / 10) ** 0.3) if not is_bs else 24000.0,
+        bar_diameters=bar_diameters,
+        effective_depth_override_mm=g.effective_depth,
         span_loads_override=span_udls,
     )
     r = design_continuous_beam(eng_in)
+
+    # d_eff now always reflects what the engine actually used for every
+    # calculation (flexure, shear, deflection) -- whether that's your
+    # override or the cover/link/bar-derived default. Previously this was
+    # computed separately here and only affected the displayed value while
+    # the engine silently kept using its own depth regardless.
+    d_eff = r["geometry"]["d_eff_mm"]
 
     sup_hog = r["moments"]["support_hogging"]
     span_sag = r["moments"]["span_sagging"]
@@ -104,7 +121,10 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
         dia = int(bars.split("Y")[1]) if "Y" in bars else 0
         return {"label": bars, "count": cnt, "bar_diameter": dia,
                 "area_required": sd.get("As_req_mm2", 0), "area_provided": As,
-                "m_resistance": round(m_rd, 2)}
+                "m_resistance": round(m_rd, 2),
+                "M_kNm": sd.get("M_kNm", 0), "K": sd.get("K", 0), "z_mm": z,
+                "beff_mm": sd.get("beff_mm"), "as_min_mm2": fl.get("As_min_mm2", 0),
+                "neutral_axis_in_flange": sd.get("neutral_axis_in_flange")}
 
     spans_out = []
     for i in range(n):
@@ -132,13 +152,36 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
         label = "End Support" if is_end else ("First Interior" if (j == 1 or j == n - 1) else "Interior")
         sd = fl["supports"].get(key, {})
         top = steel_dict(sd) if mh > 0 else steel_dict(None)
-        asw = 2 * PI / 4 * link ** 2
-        z = 0.9 * d_eff
-        if sh > 0:
-            s_calc = asw * z * fyd / (sh * 1000.0)
-            spacing = max(75, int(min(s_calc, 0.75 * d_eff, 300) // 25 * 25))
+        
+        # Calculate link spacing properly using the rigorous check
+        shear_status = r["shear"].get("status", "OK")
+        links_required = shear_status != "OK"
+        
+        # Calculate required spacing if links are needed
+        if sh > 0 and links_required:
+            # Use the rigorous shear capacity calculation
+            v_rdc = r["shear"].get("VRdc_kN", 0)
+            v_ed = sh
+            asw = 2 * PI / 4 * link ** 2  # area of 2 legs
+            z = 0.9 * d_eff
+            
+            # Calculate the required additional shear resistance
+            v_rdc_new = v_rdc  # Should use the actual VRd,c from engine
+            v_eds = v_ed - v_rdc_new
+            
+            if v_eds > 0:
+                # V_Rd,s = (A_sw/s) * z * f_ywd * cot(theta)
+                # For EC2: cot(theta) = 2.5 (default)
+                cot_theta = 2.5
+                s_calc = (asw * z * fyd * cot_theta) / (v_eds * 1000.0)
+                # Clamp spacing between min and max
+                spacing = max(75, int(min(s_calc, 0.75 * d_eff, 300) // 25 * 25))
+            else:
+                spacing = int(min(0.75 * d_eff, 300) // 25 * 25)
         else:
+            # No links required - use maximum spacing
             spacing = int(min(0.75 * d_eff, 300) // 25 * 25)
+        
         support_results.append(CBSupportResult(
             index=j, label=label, m_hogging=round(mh, 2), shear=round(sh, 2),
             top_steel=top, links={"bar_diameter": link, "spacing": spacing, "legs": 2,
@@ -161,13 +204,35 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
         m = sd.get("M_kNm", 0)
         if m_rd:
             util_bend = max(util_bend, m / m_rd)
-    v_rdc = r["shear"]["VRdc_kN"]
-    util_shear = (max_shear / v_rdc) if v_rdc else 0
-
+    
+    # Use the engine's shear status directly - NO ratio < 3.0 threshold
+    shear_status = r["shear"].get("status", "OK")
+    shear_ok = shear_status == "OK"
+    util_shear = 1.0 if shear_ok else (max_shear / r["shear"].get("VRdc_kN", 1.0))
+    
     defl = r["deflection"]
     defl_status = "PASS" if defl["status"] == "OK" else "FAIL"
-    overall = "PASS" if (util_bend <= 1 and util_shear <= 1 and defl_status == "PASS") else "FAIL"
+    
+    # Overall status must be consistent with the engine
+    bend_ok = util_bend <= 1.0
+    overall = "PASS" if (bend_ok and shear_ok and defl_status == "PASS") else "FAIL"
     code_label = "BS 8110:1997" if is_bs else "EN 1992-1-1 (EC2)"
+
+    shr = r["shear"]
+    shear_detail = {
+        "C_Rdc": shr.get("C_Rdc"), "k_factor": shr.get("k_factor"), "rho_l": shr.get("rho_l"),
+        "v_min_mpa": shr.get("v_min_mpa"),
+        "v_ed_mpa": round(max_shear * 1000 / (b * d_eff), 3) if (b * d_eff) else 0,
+        "v_rdc_mpa": round(shr.get("VRdc_kN", 0) * 1000 / (b * d_eff), 3) if (b * d_eff) else 0,
+        "links_required": not shear_ok,
+        "shear_status": shear_status,
+        "utilization": round(util_shear, 2),
+    }
+    deflection_detail = {
+        "governing_span": defl.get("governing_span"), "rho": defl.get("rho"), "rho0": defl.get("rho0"),
+        "K_sys": defl.get("K_sys"), "ld_basic": defl.get("ld_basic"),
+        "base_status": defl.get("base_status"), "F3": defl.get("F3"), "enhanced": defl.get("enhanced"),
+    }
 
     comps = [
         {"name": "Beam Self Weight", "kind": "DL", "value": round(self_w, 2)},
@@ -188,14 +253,23 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
     Lmin, Lmax = min(lengths), max(lengths)
     if Lmax and (Lmax - Lmin) / Lmax > 0.15:
         warnings.append(f"Spans vary by {round((Lmax - Lmin) / Lmax * 100)}% (longest {Lmax:.0f} mm, shortest {Lmin:.0f} mm). Analysed by direct stiffness (FEM), which is exact for unequal spans.")
+    
+    if not shear_ok:
+        warnings.append(f"Shear design required: VEd = {max_shear:.1f} kN > VRd,c = {shr.get('VRdc_kN', 0):.1f} kN. Links provided at {support_results[0].links['spacing']} mm c/c.")
 
     notes = [
         f"Design in accordance with {code_label}.",
         "Analysis by direct stiffness (FEM): element k = (EI/L)[[4,2],[2,4]], solved for joint rotations.",
         "Support hogging from member end moments; span sagging from equilibrium.",
         "Hogging designed as rectangular; sagging as T-beam (per-span effective flange).",
-        "Per-span loads honoured where provided; deflection is an L/d serviceability check.",
+        "EC2 lever arm z = d[0.5 + sqrt(0.25 - K/1.134)], matching the slab engines.",
+        (f"Effective depth d = {d_eff:.1f} mm is a user-supplied override, used directly in every flexure/shear/deflection calculation below."
+         if r["geometry"]["d_eff_is_override"] else
+         "Effective depth d = h \u2212 cover \u2212 link \u2212 bar/2 (cover includes the fixed +5 mm detailing tolerance, matching the slab engines)."),
+        "Deflection: EC2 §7.4.2 span/effective-depth ratio, two-stage (F3 only if the base ratio fails), K per EC2 Table 7.4N graded by span position.",
+        "Per-span loads honoured where provided.",
         "Dimensions in mm; forces in kN; moments in kNm.",
+        f"Shear: {'Links required' if not shear_ok else 'No links required'}.",
     ]
 
     return ContinuousBeamResult(
@@ -214,4 +288,5 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
         capacity=CBCapacity(utilization_bending=round(util_bend, 2), utilization_shear=round(util_shear, 2)),
         sls=CBSLS(deflection_actual=defl["actual_Ld"], deflection_limit=defl["allowable_Ld"],
                   deflection_status=defl_status, crack_width=0.0, crack_limit=0.30, crack_status="PASS"),
+        shear_detail=shear_detail, deflection_detail=deflection_detail,
         report=report, warnings=warnings, notes=notes)

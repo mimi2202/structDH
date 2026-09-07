@@ -169,8 +169,8 @@ export const beamAPI = {
         live_load: parseFloat(formData.liveLoad) || 0,
         other_live_load: parseFloat(formData.otherLiveLoad) || 0,
       },
-      bar_diameters: [16, 20, 25, 32],
-      link_diameter: 8,
+      bar_diameters: formData.barDiameters || [16, 20, 25, 32],
+      link_diameter: parseInt(formData.linkDiameter) || 8,
       region: formData.region || "Nigeria",
     };
 
@@ -222,8 +222,8 @@ export const continuousBeamAPI = {
         exposure_class: form.exposureClass || "XC1",
         cracked_section_sls: form.crackedSectionSls !== false,
       },
-      bar_diameters: [16, 20, 25, 32],
-      link_diameter: 8,
+      bar_diameters: form.barDiameters || [16, 20, 25, 32],
+      link_diameter: parseInt(form.linkDiameter) || 8,
       region: form.region || "Nigeria",
     };
     const res = await fetch(`${API_BASE}/api/continuous-beam/design/sync`, {

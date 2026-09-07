@@ -1,9 +1,9 @@
-import React from 'react';
-import { Navigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import React from 'react'
+import { Navigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 const ProtectedRoute = ({ children }) => {
-  const { user, loading } = useAuth();
+  const { user, loading } = useAuth()
 
   // Show loading state
   if (loading) {
@@ -16,15 +16,15 @@ const ProtectedRoute = ({ children }) => {
           <p className="text-[#6b7280]">Loading...</p>
         </div>
       </div>
-    );
+    )
   }
 
   // With mock data, user is always logged in, but keep this for when backend is ready
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace />
   }
 
-  return children;
-};
+  return children
+}
 
-export default ProtectedRoute;
+export default ProtectedRoute

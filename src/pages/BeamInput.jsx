@@ -1,11 +1,11 @@
-// src/pages/BeamInput.jsx — Simply Supported Beam (and other end conditions), mockup-faithful
+// src/pages/BeamInput.jsx — Simply Supported + Continuous Beam, mockup-faithful
 import React, { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   FiChevronDown, FiInfo, FiRefreshCw, FiSave,
-  FiArrowRight, FiLoader, FiAlertTriangle,
+  FiArrowRight, FiLoader, FiAlertTriangle, FiPlus, FiTrash2,
 } from "react-icons/fi";
-import { beamAPI } from "../services/api";
+import { beamAPI, continuousBeamAPI } from "../services/api";
 
 const CARD = "bg-white dark:bg-[#1f2937] rounded-xl shadow-sm border border-[#e2e8f0] dark:border-[#334155]";
 const INPUT = "w-full px-3 py-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1f2937] text-[#0F172A] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0A2F44] font-mono text-sm";
@@ -14,16 +14,20 @@ const TITLE = "text-[13px] font-bold uppercase tracking-wide text-[#0A2F44] dark
 const SUB = "text-[#64748b] dark:text-[#94a3b8]";
 const MAIN = "text-[#0F172A] dark:text-white";
 
+const INPUT_DRAFT_KEY_SS = "beamInputDraft";
+const INPUT_DRAFT_KEY_CB = "continuousBeamInputDraft";
+const BEAM_TYPE_KEY = "beamInputActiveType";
+
 const BEAM_TYPES = [
-  { 
-    value: "simply_supported", 
-    label: "Simply Supported Beam", 
+  {
+    value: "simply_supported",
+    label: "Simply Supported Beam",
     desc: "Single span beam with selectable end conditions (fixed, pinned, cantilever)",
     icon: "pin_pin"
   },
-  { 
-    value: "continuous", 
-    label: "Continuous Beam", 
+  {
+    value: "continuous",
+    label: "Continuous Beam",
     desc: "Multi-span continuous beam with moment redistribution and support conditions",
     icon: "continuous"
   },
@@ -42,8 +46,6 @@ const TOP_RESTRAINTS = [
 ];
 const DESIGN_CODES = [
   { value: "EC2", label: "EN 1992-1-1 (Eurocode 2)" },
-  { value: "BS8110", label: "BS 8110:1997" },
-  { value: "ACI318", label: "ACI 318" },
 ];
 const CONCRETE_EC = [
   { value: "C25/30", label: "C25/30 (fck = 25 MPa)" },
@@ -54,9 +56,21 @@ const STEEL_EC = [{ value: "B500", label: "B500B (fyk = 500 MPa)" }, { value: "B
 const CONCRETE_BS = [{ value: "M20", label: "M20 (fcu = 20 MPa)" }, { value: "M25", label: "M25 (fcu = 25 MPa)" }, { value: "M30", label: "M30 (fcu = 30 MPa)" }];
 const STEEL_BS = [{ value: "Fe415", label: "Fe415 (fy = 415 MPa)" }, { value: "Fe500", label: "Fe500 (fy = 500 MPa)" }];
 
+// Continuous beam -- matches continuous_beam_schemas.py exactly
+const END_SUPPORTS = [
+  { value: "simple", label: "Simple (Pinned Ends)" },
+  { value: "continuous", label: "Continuous (Both Ends)" },
+];
+const EXPOSURE_CLASSES = [
+  { value: "XC1", label: "XC1" }, { value: "XC2", label: "XC2" },
+  { value: "XC3", label: "XC3" }, { value: "XC4", label: "XC4" },
+];
+const CB_BAR_SETS = [[16, 20, 25], [20, 25, 32], [16, 20, 25, 32]];
+const SS_BAR_SETS = [[20, 25, 16], [16, 20, 25], [20, 25, 32], [16, 20, 25, 32]];
+
 const DEFAULTS = {
   beamId: "B1",
-  designCode: "BS8110",
+  designCode: "EC2",
   supportCondition: "both_ends_simply_supported",
   topRestraint: "continuous",
   span: "6000", width: "300", depth: "500", effectiveCover: "25",
@@ -66,15 +80,73 @@ const DEFAULTS = {
   selfWeightAuto: true,
   wallLoad: "10", finishes: "1.5", additionalDeadLoad: "1.2",
   liveLoad: "3", otherLiveLoad: "2",
+  barDiameters: [20, 25, 16],
+  linkDiameter: 8,
+  region: "Nigeria",
+};
+
+const CB_DEFAULTS = {
+  beamId: "CB1",
+  designCode: "EC2",
+  analysisMethod: "Linear Elastic",
+  nSpans: 3,
+  spanLengths: ["4000", "5000", "4500"],
+  width: "225", depth: "450", effectiveDepth: "",
+  cover: "25",
+  concreteGrade: "C30/37", steelGrade: "B500",
+  unitWeightConcrete: "25", unitWeightSteel: "78.5",
+  selfWeightAuto: true,
+  wallLoad: "10", finishes: "1.5", additionalDeadLoad: "1.2",
+  liveLoad: "3", otherLiveLoad: "2",
+  endSupport: "simple",
+  designWorkingLife: "50", exposureClass: "XC1", crackedSectionSls: true,
+  barDiameters: [20, 25, 16],
+  linkDiameter: 8,
   region: "Nigeria",
 };
 
 const BeamInput = () => {
   const navigate = useNavigate();
-  const [f, setF] = useState(DEFAULTS);
+  const location = useLocation();
+  const [beamType, setBeamType] = useState(() => {
+    // The route itself is the strongest signal -- /continuous-beam always
+    // means the user is here for a continuous beam (e.g. navigating back
+    // from ContinuousBeamResults.jsx), regardless of whatever type was
+    // used in a previous session.
+    if (location.pathname.includes("continuous-beam")) return "continuous";
+    if (location.pathname === "/beam") {
+      try {
+        const saved = sessionStorage.getItem(BEAM_TYPE_KEY);
+        if (saved === "simply_supported" || saved === "continuous") return saved;
+      } catch {}
+    }
+    return "simply_supported";
+  });
+
+  const [f, setF] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem(INPUT_DRAFT_KEY_SS);
+      return saved ? { ...DEFAULTS, ...JSON.parse(saved) } : DEFAULTS;
+    } catch { return DEFAULTS; }
+  });
+  const [cb, setCb] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem(INPUT_DRAFT_KEY_CB);
+      return saved ? { ...CB_DEFAULTS, ...JSON.parse(saved) } : CB_DEFAULTS;
+    } catch { return CB_DEFAULTS; }
+  });
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const set = (p) => setF((prev) => ({ ...prev, ...p }));
+  const setCB = (p) => setCb((prev) => ({ ...prev, ...p }));
+
+  useEffect(() => {
+    try { sessionStorage.setItem(INPUT_DRAFT_KEY_SS, JSON.stringify(f)); } catch {}
+  }, [f]);
+  useEffect(() => {
+    try { sessionStorage.setItem(INPUT_DRAFT_KEY_CB, JSON.stringify(cb)); } catch {}
+  }, [cb]);
 
   const isBS = f.designCode === "BS8110";
   const concreteOpts = isBS ? CONCRETE_BS : CONCRETE_EC;
@@ -87,13 +159,47 @@ const BeamInput = () => {
   const ll = (parseFloat(f.liveLoad) || 0) + (parseFloat(f.otherLiveLoad) || 0);
   const service = dl + ll;
 
-  const reset = () => { if (window.confirm("Reset all fields?")) { setF(DEFAULTS); setError(null); } };
+  // continuous beam derived values
+  const cbSelfW = cb.selfWeightAuto ? (parseFloat(cb.width) / 1000) * (parseFloat(cb.depth) / 1000) * (parseFloat(cb.unitWeightConcrete) || 0) : 0;
+  const cbDl = cbSelfW + (parseFloat(cb.wallLoad) || 0) + (parseFloat(cb.finishes) || 0) + (parseFloat(cb.additionalDeadLoad) || 0);
+  const cbLl = (parseFloat(cb.liveLoad) || 0) + (parseFloat(cb.otherLiveLoad) || 0);
+  const cbTotalLen = cb.spanLengths.reduce((a, b) => a + (parseFloat(b) || 0), 0);
+
+  const reset = () => {
+    if (window.confirm("Reset all fields?")) {
+      if (beamType === "simply_supported") { setF(DEFAULTS); } else { setCb(CB_DEFAULTS); }
+      setError(null);
+    }
+  };
+
+  const setSpan = (i, v) => {
+    const s = [...cb.spanLengths];
+    s[i] = v;
+    setCB({ spanLengths: s, nSpans: s.length });
+  };
+  const addSpan = () => setCB({ spanLengths: [...cb.spanLengths, "4000"], nSpans: cb.spanLengths.length + 1 });
+  const removeSpan = (i) => {
+    if (cb.spanLengths.length <= 2) return;   // schema requires n_spans >= 2
+    const s = cb.spanLengths.filter((_, j) => j !== i);
+    setCB({ spanLengths: s, nSpans: s.length });
+  };
 
   const proceed = async () => {
     setBusy(true); setError(null);
     try {
-      const result = await beamAPI.startDesign(f);
-      navigate("/beam-results", { state: { designResult: result } });
+      if (beamType === "simply_supported") {
+        const result = await beamAPI.startDesign(f);
+        navigate("/beam-results", { state: { designResult: result, formData: f } });
+      } else {
+        const lens = cb.spanLengths.map((v) => parseFloat(v));
+        if (cb.spanLengths.length < 2 || lens.some((v) => !v || v <= 0)) {
+          setError("A continuous beam needs at least 2 spans, each greater than 0.");
+          setBusy(false);
+          return;
+        }
+        const result = await continuousBeamAPI.startDesign(cb);
+        navigate("/continuous-beam-results", { state: { designResult: result, formData: cb } });
+      }
     } catch (e) {
       setError(e.message || "Design request failed.");
     } finally { setBusy(false); }
@@ -112,28 +218,28 @@ const BeamInput = () => {
                 <button
                   key={bt.value}
                   onClick={() => {
-                    if (bt.value === "continuous") {
-                      navigate("/continuous-beam");
-                    }
+                    setBeamType(bt.value);
+                    setError(null);
+                    try { sessionStorage.setItem(BEAM_TYPE_KEY, bt.value); } catch {}
                   }}
                   className={`rounded-xl border-2 p-5 text-left transition-all ${
-                    bt.value === "simply_supported"
+                    beamType === bt.value
                       ? "border-[#0A2F44] bg-[#e6f0f5] dark:border-[#66a4c2] dark:bg-[#1e3a4a] ring-1 ring-[#0A2F44]"
                       : "border-[#e2e8f0] dark:border-[#334155] hover:border-[#94a3b8] dark:hover:border-[#475569] bg-white dark:bg-[#1f2937]"
                   }`}
                 >
                   <div className="flex items-start gap-4">
                     <div className={`p-2 rounded-lg ${
-                      bt.value === "simply_supported" 
-                        ? "bg-[#0A2F44]/10 dark:bg-[#0A2F44]/20" 
+                      beamType === bt.value
+                        ? "bg-[#0A2F44]/10 dark:bg-[#0A2F44]/20"
                         : "bg-[#f1f5f9] dark:bg-[#334155]"
                     }`}>
                       <BeamTypeGlyph kind={bt.icon} />
                     </div>
                     <div>
                       <p className={`text-sm font-bold ${
-                        bt.value === "simply_supported" 
-                          ? "text-[#0A2F44] dark:text-[#66a4c2]" 
+                        beamType === bt.value
+                          ? "text-[#0A2F44] dark:text-[#66a4c2]"
                           : "text-[#0F172A] dark:text-white"
                       }`}>
                         {bt.label}
@@ -141,12 +247,6 @@ const BeamInput = () => {
                       <p className="text-xs text-[#64748b] dark:text-[#94a3b8] mt-1">{bt.desc}</p>
                     </div>
                   </div>
-                  {bt.value === "continuous" && (
-                    <div className="mt-3 flex items-center gap-1 text-xs text-[#0A2F44] dark:text-[#66a4c2] font-medium">
-                      <span>Open Continuous Beam Designer</span>
-                      <FiArrowRight size={12} />
-                    </div>
-                  )}
                 </button>
               ))}
             </div>
@@ -160,10 +260,17 @@ const BeamInput = () => {
           )}
 
           <div className="mb-5">
-            <h1 className="text-base font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Simply Supported Beam Input</h1>
-            <p className={`text-sm ${SUB}`}>Enter beam details, material properties, loads and support conditions.</p>
+            <h1 className="text-base font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">
+              {beamType === "simply_supported" ? "Simply Supported Beam Input" : "Continuous Beam Input"}
+            </h1>
+            <p className={`text-sm ${SUB}`}>
+              {beamType === "simply_supported"
+                ? "Enter beam details, material properties, loads and support conditions."
+                : "Multi-span continuous beam · stiffness-method (FEM) analysis · EC2."}
+            </p>
           </div>
 
+          {beamType === "simply_supported" ? (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <div className="lg:col-span-2 space-y-5">
               {/* 1. GENERAL */}
@@ -223,6 +330,12 @@ const BeamInput = () => {
                   <div><label className={LABEL}>Steel Grade</label><Dropdown value={f.steelGrade} onChange={(e) => set({ steelGrade: e.target.value })} options={steelOpts} /></div>
                   <Field label="Unit Weight of Concrete" unit="kN/m³" value={f.unitWeightConcrete} onChange={(v) => set({ unitWeightConcrete: v })} step="0.5" />
                   <Field label="Unit Weight of Steel" unit="kN/m³" value={f.unitWeightSteel} onChange={(v) => set({ unitWeightSteel: v })} step="0.5" />
+                  <div>
+                    <label className={LABEL}>Bar Set (mm, main bar first)</label>
+                    <Dropdown value={f.barDiameters.join(",")} onChange={(e) => set({ barDiameters: e.target.value.split(",").map(Number) })}
+                      options={SS_BAR_SETS.map((b) => ({ value: b.join(","), label: b.join(", ") }))} />
+                  </div>
+                  <Field label="Link Diameter" unit="mm" value={f.linkDiameter} onChange={(v) => set({ linkDiameter: v })} step="2" />
                 </div>
               </Section>
 
@@ -281,6 +394,8 @@ const BeamInput = () => {
                     <SumRow label="Effective Cover" value={`${f.effectiveCover} mm`} />
                     <SumRow label="Concrete Grade" value={f.concreteGrade} />
                     <SumRow label="Steel Grade" value={f.steelGrade} />
+                    <SumRow label="Bar Set" value={f.barDiameters.join(", ") + " mm"} />
+                    <SumRow label="Link Diameter" value={`${f.linkDiameter} mm`} />
                     <SumRow label="Total Dead Load (DL)" value={`${dl.toFixed(2)} kN/m`} />
                     <SumRow label="Total Live Load (LL)" value={`${ll.toFixed(2)} kN/m`} />
                     <SumRow label="Total Service Load" value={`${service.toFixed(2)} kN/m`} strong />
@@ -290,6 +405,138 @@ const BeamInput = () => {
               </div>
             </div>
           </div>
+          ) : (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2 space-y-5">
+              {/* 1. GENERAL */}
+              <Section n="1" title="General">
+                <div>
+                  <label className={LABEL}>Beam Name / ID</label>
+                  <input className={INPUT} value={cb.beamId} onChange={(e) => setCB({ beamId: e.target.value })} />
+                </div>
+              </Section>
+
+              {/* 2. SPANS */}
+              <Section n="2" title="Spans" info>
+                <div className="mb-3 flex items-center justify-between">
+                  <label className={LABEL}>Span Lengths (mm)</label>
+                  <button onClick={addSpan} className="flex items-center gap-1.5 rounded-lg bg-[#e6f0f5] px-2.5 py-1 text-xs font-medium text-[#0A2F44] hover:bg-[#d4e6ef] dark:bg-[#1e3a4a] dark:text-[#66a4c2]">
+                    <FiPlus size={13} /> Add span
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {cb.spanLengths.map((v, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className={`w-16 text-xs font-semibold ${SUB}`}>Span {i + 1}</span>
+                      <input type="number" step="100" min="0" className={INPUT} value={v} onChange={(e) => setSpan(i, e.target.value)} />
+                      <button
+                        onClick={() => removeSpan(i)}
+                        disabled={cb.spanLengths.length <= 2}
+                        className="rounded-lg p-2 text-[#64748b] hover:bg-red-50 hover:text-red-600 disabled:opacity-30 dark:hover:bg-red-900/20"
+                        title="Remove span"
+                      >
+                        <FiTrash2 size={15} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <p className={`mt-3 text-[11px] ${SUB}`}>{cb.spanLengths.length} spans (min 2, max 8) · total length {cbTotalLen.toFixed(0)} mm</p>
+              </Section>
+
+              {/* 3. SECTION & MATERIALS */}
+              <Section n="3" title="Section & Materials">
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                  <Field label="Width (b)" unit="mm" value={cb.width} onChange={(v) => setCB({ width: v })} step="25" />
+                  <Field label="Overall Depth (D)" unit="mm" value={cb.depth} onChange={(v) => setCB({ depth: v })} step="25" />
+                  <Field label="Cover" unit="mm" value={cb.cover} onChange={(v) => setCB({ cover: v })} step="5" />
+                  <div>
+                    <label className={LABEL}>Concrete Grade</label>
+                    <Dropdown value={cb.concreteGrade} onChange={(e) => setCB({ concreteGrade: e.target.value })} options={CONCRETE_EC} />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Steel Grade</label>
+                    <Dropdown value={cb.steelGrade} onChange={(e) => setCB({ steelGrade: e.target.value })} options={STEEL_EC} />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Bar Set (mm, main bar first)</label>
+                    <Dropdown value={cb.barDiameters.join(",")} onChange={(e) => setCB({ barDiameters: e.target.value.split(",").map(Number) })}
+                      options={CB_BAR_SETS.map((b) => ({ value: b.join(","), label: b.join(", ") }))} />
+                  </div>
+                  <Field label="Link Diameter" unit="mm" value={cb.linkDiameter} onChange={(v) => setCB({ linkDiameter: v })} step="2" />
+                  <div>
+                    <label className={LABEL}>Effective Depth (optional override)</label>
+                    <input type="number" step="5" placeholder="auto from cover/link/bar" className={INPUT} value={cb.effectiveDepth} onChange={(e) => setCB({ effectiveDepth: e.target.value })} />
+                  </div>
+                </div>
+                <p className={`mt-2 text-[11px] ${SUB}`}>Leave Effective Depth blank to derive it automatically from overall depth, cover, link, and bar diameter. If set, it's used directly in every flexure, shear, and deflection calculation.</p>
+              </Section>
+
+              {/* 4. LOADS */}
+              <Section n="4" title="Loads (per metre, applied across all spans unless overridden)">
+                <div className="overflow-hidden rounded-lg border border-[#e2e8f0] dark:border-[#334155]">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="bg-[#f8fafc] dark:bg-[#0b0f19] text-[10px] uppercase tracking-wide text-[#94a3b8]">
+                        <th className="px-3 py-2 font-semibold">Load Type</th>
+                        <th className="px-3 py-2 font-semibold">Value (kN/m)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-t border-[#f1f5f9] dark:border-[#334155]">
+                        <td className={`px-3 py-2 ${MAIN}`}>
+                          <label className="flex items-center gap-2">
+                            <input type="checkbox" checked={cb.selfWeightAuto} onChange={(e) => setCB({ selfWeightAuto: e.target.checked })} />
+                            Beam Self Weight <span className={`text-xs ${SUB}`}>(auto)</span>
+                          </label>
+                        </td>
+                        <td className={`px-3 py-2 font-mono ${SUB}`}>{cbSelfW.toFixed(2)}</td>
+                      </tr>
+                      <LoadRow label="Wall Load (Uniform)" value={cb.wallLoad} onChange={(v) => setCB({ wallLoad: v })} />
+                      <LoadRow label="Finishes" value={cb.finishes} onChange={(v) => setCB({ finishes: v })} />
+                      <LoadRow label="Additional Dead Load" value={cb.additionalDeadLoad} onChange={(v) => setCB({ additionalDeadLoad: v })} />
+                      <TotalRow label="Total Dead Load (DL)" value={cbDl} />
+                      <LoadRow label="Live Load (LL)" value={cb.liveLoad} onChange={(v) => setCB({ liveLoad: v })} />
+                      <LoadRow label="Other Live Load" value={cb.otherLiveLoad} onChange={(v) => setCB({ otherLiveLoad: v })} />
+                      <TotalRow label="Total Live Load (LL)" value={cbLl} />
+                      <TotalRow label="Total Service Load (DL + LL)" value={cbDl + cbLl} strong />
+                    </tbody>
+                  </table>
+                </div>
+                <p className={`mt-2 text-[11px] ${SUB}`}>Per-span load overrides are available via the API's span_loads field; not yet exposed here.</p>
+              </Section>
+            </div>
+
+            {/* RIGHT */}
+            <div className="hidden lg:block">
+              <div className="sticky top-6 space-y-5">
+                <RightCard title="Beam Preview — Span Layout">
+                  <ContinuousElevationView spans={cb.spanLengths} depth={cb.depth} />
+                </RightCard>
+                <RightCard title="Cross Section">
+                  <CrossSection width={cb.width} depth={cb.depth} />
+                </RightCard>
+                <RightCard title="Input Summary">
+                  <div className="space-y-1.5">
+                    <SumRow label="Beam Name / ID" value={cb.beamId} />
+                    <SumRow label="Spans" value={cb.spanLengths.length} />
+                    <SumRow label="Span Lengths" value={cb.spanLengths.join(", ") + " mm"} />
+                    <SumRow label="Width (b)" value={`${cb.width} mm`} />
+                    <SumRow label="Overall Depth (D)" value={`${cb.depth} mm`} />
+                    <SumRow label="Cover" value={`${cb.cover} mm`} />
+                    <SumRow label="Effective Depth" value={cb.effectiveDepth ? `${cb.effectiveDepth} mm (override)` : "auto"} />
+                    <SumRow label="Concrete Grade" value={cb.concreteGrade} />
+                    <SumRow label="Steel Grade" value={cb.steelGrade} />
+                    <SumRow label="Bar Set" value={cb.barDiameters.join(", ") + " mm"} />
+                    <SumRow label="Link Diameter" value={`${cb.linkDiameter} mm`} />
+                    <SumRow label="Total Dead Load (DL)" value={`${cbDl.toFixed(2)} kN/m`} />
+                    <SumRow label="Total Live Load (LL)" value={`${cbLl.toFixed(2)} kN/m`} />
+                    <SumRow label="Total Service Load" value={`${(cbDl + cbLl).toFixed(2)} kN/m`} strong />
+                  </div>
+                </RightCard>
+              </div>
+            </div>
+          </div>
+          )}
         </div>
 
         <div className="border-t border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1f2937] px-6 py-4">
@@ -442,6 +689,28 @@ function ElevationView({ support, span, depth }) {
       <text x="250" y="114" fontSize="10" fill={DIM} textAnchor="middle">L = {span} mm</text>
       <line x1="452" y1="34" x2="452" y2="56" stroke={DIM} strokeWidth="1" markerStart="url(#be)" markerEnd="url(#be)" />
       <text x="458" y="48" fontSize="9" fill={DIM}>D = {depth} mm</text>
+    </svg>
+  );
+}
+function ContinuousElevationView({ spans, depth }) {
+  const DIM = "var(--dim)";
+  const lens = spans.map((s) => parseFloat(s) || 1);
+  const total = lens.reduce((a, b) => a + b, 0) || 1;
+  const x0 = 40, W = 400;
+  const nodes = [x0];
+  let acc = x0;
+  lens.forEach((l) => { acc += (l / total) * W; nodes.push(acc); });
+  return (
+    <svg viewBox="0 0 480 110" className="w-full text-[#94a3b8] dark:text-[#64748b] [--dim:#0A2F44] dark:[--dim:#66a4c2]">
+      <rect x={nodes[0]} y="34" width={nodes[nodes.length - 1] - nodes[0]} height="18" fill="currentColor" fillOpacity="0.45" stroke="currentColor" strokeWidth="1.2" />
+      {nodes.map((x, i) => (
+        <path key={i} d={`M${x},52 l-8,12 h16 z`} fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1.3" />
+      ))}
+      {lens.map((l, i) => {
+        const xa = nodes[i], xb = nodes[i + 1];
+        return <text key={i} x={(xa + xb) / 2} y="88" fontSize="9" fill={DIM} textAnchor="middle">{l.toFixed(0)}</text>;
+      })}
+      <text x={(nodes[0] + nodes[nodes.length - 1]) / 2} y="102" fontSize="9" fill={DIM} fillOpacity="0.7" textAnchor="middle">span lengths (mm)</text>
     </svg>
   );
 }

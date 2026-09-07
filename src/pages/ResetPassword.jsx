@@ -1,21 +1,21 @@
-import React, { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
-import { yupResolver } from '@hookform/resolvers/yup';
-import { FiArrowLeft, FiLock, FiEye, FiEyeOff } from 'react-icons/fi';
-import { useTheme } from '../contexts/ThemeContext';
-import { useAuth } from '../contexts/AuthContext';
-import { resetPasswordSchema } from '../utils/validation';
+import React, { useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
+import { yupResolver } from '@hookform/resolvers/yup'
+import { FiArrowLeft, FiLock, FiEye, FiEyeOff } from 'react-icons/fi'
+import { useTheme } from '../contexts/ThemeContext'
+import { useAuth } from '../contexts/AuthContext'
+import { resetPasswordSchema } from '../utils/validation'
 
 const ResetPassword = () => {
-  const { isDarkMode } = useTheme();
-  const { resetPassword } = useAuth();
-  const navigate = useNavigate();
-  const { token } = useParams();
-  const [showPassword, setShowPassword] = useState(false);
-  [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [serverError, setServerError] = useState('');
+  const { isDarkMode } = useTheme()
+  const { resetPassword } = useAuth()
+  const navigate = useNavigate()
+  const { token } = useParams()
+  const [showPassword, setShowPassword] = useState(false)
+  ;[showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [serverError, setServerError] = useState('')
 
   const {
     register,
@@ -23,46 +23,48 @@ const ResetPassword = () => {
     formState: { errors },
   } = useForm({
     resolver: yupResolver(resetPasswordSchema),
-  });
+  })
 
   const onSubmit = async (data) => {
-    setIsSubmitting(true);
-    setServerError('');
-    
-    const result = await resetPassword(token, data.password);
-    
+    setIsSubmitting(true)
+    setServerError('')
+
+    const result = await resetPassword(token, data.password)
+
     if (result.success) {
       // Redirect to login with success message
-      navigate('/login', { state: { message: 'Password reset successful. Please login with your new password.' } });
+      navigate('/login', {
+        state: { message: 'Password reset successful. Please login with your new password.' },
+      })
     } else {
-      setServerError(result.error);
+      setServerError(result.error)
     }
-    
-    setIsSubmitting(false);
-  };
+
+    setIsSubmitting(false)
+  }
 
   return (
-    <div 
+    <div
       className="min-h-screen w-full flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 transition-colors duration-300"
       style={{ backgroundColor: 'var(--bg-primary)' }}
     >
-      <div 
+      <div
         className="p-8 rounded-xl shadow-lg max-w-md w-full transition-colors duration-300"
-        style={{ 
+        style={{
           backgroundColor: 'var(--bg-card)',
-          border: `1px solid var(--border-color)`
+          border: `1px solid var(--border-color)`,
         }}
       >
-        <Link 
-          to="/login" 
+        <Link
+          to="/login"
           className="inline-flex items-center text-sm hover:underline mb-6 transition-colors duration-300"
           style={{ color: 'var(--accent)' }}
         >
           <FiArrowLeft className="mr-2" /> Back to login
         </Link>
-        
+
         <div className="text-center mb-8">
-          <div 
+          <div
             className="w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4"
             style={{ backgroundColor: '#0A2F44' }}
           >
@@ -81,21 +83,23 @@ const ResetPassword = () => {
             {serverError}
           </div>
         )}
-        
+
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           {/* New Password */}
           <div className="relative">
-            <FiLock className="absolute left-3 top-1/2 transform -translate-y-1/2" 
-                    style={{ color: 'var(--text-muted)' }} />
+            <FiLock
+              className="absolute left-3 top-1/2 transform -translate-y-1/2"
+              style={{ color: 'var(--text-muted)' }}
+            />
             <input
               type={showPassword ? 'text' : 'password'}
               {...register('password')}
               placeholder="New password"
               className="w-full pl-10 pr-12 py-3 rounded-lg transition-colors duration-300"
-              style={{ 
+              style={{
                 backgroundColor: 'var(--bg-primary)',
                 border: `1px solid ${errors.password ? '#ef4444' : 'var(--border-color)'}`,
-                color: 'var(--text-primary)'
+                color: 'var(--text-primary)',
               }}
             />
             <button
@@ -113,17 +117,19 @@ const ResetPassword = () => {
 
           {/* Confirm Password */}
           <div className="relative">
-            <FiLock className="absolute left-3 top-1/2 transform -translate-y-1/2" 
-                    style={{ color: 'var(--text-muted)' }} />
+            <FiLock
+              className="absolute left-3 top-1/2 transform -translate-y-1/2"
+              style={{ color: 'var(--text-muted)' }}
+            />
             <input
               type={showConfirmPassword ? 'text' : 'password'}
               {...register('confirmPassword')}
               placeholder="Confirm new password"
               className="w-full pl-10 pr-12 py-3 rounded-lg transition-colors duration-300"
-              style={{ 
+              style={{
                 backgroundColor: 'var(--bg-primary)',
                 border: `1px solid ${errors.confirmPassword ? '#ef4444' : 'var(--border-color)'}`,
-                color: 'var(--text-primary)'
+                color: 'var(--text-primary)',
               }}
             />
             <button
@@ -150,7 +156,7 @@ const ResetPassword = () => {
         </form>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default ResetPassword;
+export default ResetPassword
