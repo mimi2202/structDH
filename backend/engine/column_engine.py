@@ -1520,16 +1520,39 @@ class ColumnEngine:
             row("Bar layout", f"As = {geo.n_bars} x pi x {f1(geo.bar_dia)}^2 / 4", f"{f1(geo.As_total)} mm2"),
             row("Bar layout", f"d' = cover + link + phi/2 = {f1(geo.cover)} + {f1(geo.link_dia)} + {f1(geo.bar_dia/2)}", f"{f1(geo.d_prime)} mm"),
         ]
-        if d.level_specs:
-            rows.append(row("Per-storey", "the values above are the base column; these storeys "
-                                          "differ and are designed with their own section",
-                            f"{len(d.level_specs)} storey(s) edited"))
+        # The rows above describe ONE column: the base section and cage from
+        # step 2. That stops being the whole story once a storey ends up with
+        # different values -- either because it was explicitly edited
+        # (level_specs) or because auto-size chose a different cage there
+        # than it chose elsewhere. self.geo_by_level already reflects
+        # whichever of those happened, by the time the report is built (it is
+        # assigned fresh in autosize_level() for any storey that passed a
+        # search, and never touches self.geo, the base object, so a mismatch
+        # here is real divergence, not a stale read).
+        def _differs(g2):
+            return (abs(g2.b - geo.b) > 1e-6 or abs(g2.h - geo.h) > 1e-6
+                    or abs(g2.bar_dia - geo.bar_dia) > 1e-6 or g2.n_bars != geo.n_bars
+                    or abs(g2.link_dia - geo.link_dia) > 1e-6 or abs(g2.cover - geo.cover) > 1e-6)
+
+        diverging = [lv2 for lv2, g2 in self.geo_by_level.items() if _differs(g2)]
+        if d.level_specs or diverging:
+            cause = []
+            if d.level_specs:
+                cause.append(f"{len(d.level_specs)} storey(s) edited on input")
+            if d.autosize_bars:
+                cause.append("bars chosen independently per storey by auto-size")
+            rows.append(row("Per-storey", "the values above are the base column; the "
+                                          "storeys below differ from it "
+                                          f"({', '.join(cause) if cause else 'per-storey values differ'})",
+                            f"{len(diverging)} storey(s) differ" if diverging
+                            else f"{len(d.level_specs)} storey(s) edited"))
             for lv2 in self.geo_by_level:
                 g2 = self.geo_by_level[lv2]
+                flag = "" if g2 in (geo,) or not _differs(g2) else "  <- differs from base"
                 rows.append(row(f"{lv2}",
                                 f"b x h = {f1(g2.b)} x {f1(g2.h)}, {g2.n_bars} x Y{int(g2.bar_dia)}, "
                                 f"links Y{int(g2.link_dia)}, cover {f1(g2.cover)}, d' = {f1(g2.d_prime)}",
-                                f"ix {f3(g2.ix)}, iy {f3(g2.iy)} mm"))
+                                f"ix {f3(g2.ix)}, iy {f3(g2.iy)} mm{flag}"))
         sec_list.append(section("3. GEOMETRY, COVER AND BAR LAYOUT", rows))
 
         # 4 / 5 --------------------------------------------------
