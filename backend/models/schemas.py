@@ -1,6 +1,6 @@
 # backend/models/schemas.py
 from pydantic import BaseModel, Field, model_validator
-from typing import List, Optional, Dict, Union
+from typing import List, Optional, Dict, Union, Literal
 from enum import Enum
 
 class SlabType(str, Enum):
@@ -70,6 +70,25 @@ class DesignParameters(BaseModel):
     crack_width_limit: float = Field(0.3, description="Crack width limit in mm")
     deflection_limit: int = Field(250, description="Deflection limit as L/?")
 
+class SlabDesignBasis(BaseModel):
+    """
+    Printed on the first page of the Detailed Report. All optional and all
+    free text: who designed, who checked, and whether an independent check
+    is required or done are the designer's own statements -- nothing here is
+    inferred or filled in automatically. Left blank, the report says
+    "not entered" rather than silently omitting the row.
+    """
+    designer_name: Optional[str] = Field(None, max_length=120)
+    designer_qualifications: Optional[str] = Field(None, max_length=160)
+    checked_by: Optional[str] = Field(None, max_length=120)
+    checker_qualifications: Optional[str] = Field(None, max_length=160)
+    stability_responsible: Optional[str] = Field(
+        None, max_length=160,
+        description="Organisation or individual with overall responsibility for "
+                    "the stability of the structure.",
+    )
+    independent_check: Optional[Literal["required", "completed"]] = None
+
 class SlabDesignRequest(BaseModel):
     slab_type: SlabType
     # Accepts either the two-way set or the one-way set; validated against slab_type below.
@@ -83,6 +102,7 @@ class SlabDesignRequest(BaseModel):
     use_ai: bool = Field(False, description="Enable AI recommendation")
     region: str = Field("UK", description="Region for cost rates")
     building_use: str = Field("office", description="Occupancy for two-way EC2 engine presets / auto-loads")
+    design_basis: SlabDesignBasis = SlabDesignBasis()
 
     @model_validator(mode="after")
     def check_continuity_matches_type(self):
@@ -106,6 +126,42 @@ class SlabDesignRequest(BaseModel):
                 f"span_lx ({self.geometry.span_lx} m) must not be greater than span_ly "
                 f"({self.geometry.span_ly} m). Lx is always the short span and Ly the long span -- "
                 f"swap the values if the short span is actually the larger number you entered."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_design_code_disabled(self):
+        """
+        BS8110 and ACI318 are both blocked here, for two different reasons.
+
+        BS8110 used to run a separate, simplified formula set in
+        slab_service.py's non-EC2 fallback branch -- fixed effective depth
+        instead of the iterative bar-diameter convergence the EC2 engines do,
+        and a generic deflection check rather than full EC2 Cl. 7.4.2. That
+        branch was removed on 2026-10-03, so there is no BS8110 slab path at
+        all; this validator is what stops such a request.
+
+        ACI318 is worse: slab_service.py only branches on an `is_bs` flag
+        that is True for BS8110 and nothing else, so an ACI318 request falls
+        into the SAME branch as EC2 and silently runs the EC2 K/z/As/shear
+        formulas -- while the response's code_label separately prints
+        "ACI 318" over that EC2 result. Disabled until a real, reviewed
+        ACI 318 path exists; this is not a maturity gap, it is a design
+        calculated to one code and labelled as another.
+        """
+        code = self.design_params.design_code
+        code = code.value if hasattr(code, "value") else code
+        if code == "BS8110":
+            raise ValueError(
+                "BS8110 is not available for slabs yet -- it runs a simplified "
+                "formula set that has not been reviewed to the same standard as "
+                "the EC2 engines. Please select EC2 for now."
+            )
+        if code == "ACI318":
+            raise ValueError(
+                "ACI318 is not available for slabs -- a request under this code "
+                "currently runs the EC2 formulas and labels the result ACI 318, "
+                "which is wrong, not just unreviewed. Please select EC2 for now."
             )
         return self
 
@@ -226,6 +282,8 @@ class ContinuousSlabRequest(BaseModel):
     design_params: DesignParameters
     bar_diameters: Optional[List[int]] = Field([10, 12, 16])
     region: str = Field("UK")
+    occupancy: Optional[str] = None   # sets psi_2 for the crack check; None = not stated (psi_2 = 0.6 assumed)
+    design_basis: SlabDesignBasis = SlabDesignBasis()
 
     @model_validator(mode="after")
     def check_spans(self):
@@ -247,6 +305,28 @@ class ContinuousSlabRequest(BaseModel):
                 f"system, or flat slab for this span instead."
             )
         return self
+    @model_validator(mode="after")
+    def check_design_code_disabled(self):
+        """
+        continuous_slab_service.py has no code branching at all: every
+        request runs through the one EC2 continuous engine regardless of
+        design_code, and DesignSummary has no design_code field to even
+        print a (correct or incorrect) label. BS8110 and ACI318 are both
+        blocked here for the identical reason -- there is no separate path
+        for either, so selecting one currently produces a silent EC2 design
+        with nothing on the output to say so.
+        """
+        code = self.design_params.design_code
+        code = code.value if hasattr(code, "value") else code
+        if code in ("BS8110", "ACI318"):
+            raise ValueError(
+                f"{code} is not available for continuous slabs -- there is no "
+                f"{code} calculation path; a request under this code would "
+                f"silently run the EC2 continuous engine with nothing on the "
+                f"output to indicate that. Please select EC2 for now."
+            )
+        return self
+
 
 class SpanDesignOut(BaseModel):
     index: int

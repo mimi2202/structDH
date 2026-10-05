@@ -9,10 +9,29 @@ from models.schemas import (
     ComplianceCheck, CostBreakdown, DiagramOut, ReportSection,
 )
 
+from services.report_front_matter import (
+    front_matter, ndp_partial_factors, ndp_alpha_cc_k_method, ndp_cover_rows,
+    ndp_min_steel, ndp_shear_no_links, ndp_deflection, row as _fm_row,
+)
+
 try:
     from engine.continuous_one_way_slab_engine import design_continuous_slab, ContinuousInput
+    from engine.two_way_slab_engine import EXPOSURE_MIN_DUR_MM
 except ImportError:
     from continuous_one_way_slab_engine import design_continuous_slab, ContinuousInput
+    from two_way_slab_engine import EXPOSURE_MIN_DUR_MM
+
+# EN 1992-1-2 Table 5.8, one-way solid slabs: REI (min) -> (min thickness h_s, min axis distance a), mm
+FIRE_TABLE_5_8 = {30: (60, 10), 60: (80, 20), 90: (100, 30), 120: (120, 40), 180: (150, 55), 240: (175, 65)}
+# EC2 Table 7.3N: max bar spacing (mm) by steel stress sigma_s (MPa) for w_k = 0.4 / 0.3 / 0.2 mm (None = not permitted)
+CRACK_TABLE_7_3N = [(160, 300, 300, 200), (200, 300, 250, 150), (240, 250, 200, 100),
+                    (280, 200, 150, 50), (320, 150, 100, None), (360, 100, 50, None)]
+# EC2 Table 7.1N recommended w_max (reinforced members, quasi-permanent combination), mm
+W_MAX_7_1N = {"XC1": 0.4, "XC2": 0.3, "XC3": 0.3, "XC4": 0.3}
+# EN 1990 Table A1.1 psi_2 by occupancy (keys as sent by ContinuousSlabInput.jsx)
+PSI2_BY_OCCUPANCY = {"residential": 0.3, "office": 0.3, "classroom": 0.6, "assembly": 0.6,
+                     "retail": 0.6, "parking": 0.6, "storage": 0.8}
+PSI2_UNSTATED = 0.6
 
 
 def _enum(v):
@@ -67,22 +86,22 @@ def calculate_continuous_slab(request: ContinuousSlabRequest) -> ContinuousSlabR
 
     res = design_continuous_slab(inp)
     b = 1000.0
+    dfc_rows, dfc_checks = _durability_fire_crack(request, res)
+    overall = "FAIL" if (res.overall_status == "FAIL" or any(c.status == "FAIL" for c in dfc_checks)) else res.overall_status
 
-    # governing span steel for the summary
     gov_span = max(res.spans, key=lambda s: s.M_sag_kNm)
     gov_bar = gov_span.bar
     total_len = sum(request.span_lengths)
 
-    # ---- cost (1 m strip over whole beam length) ----
     db = _load_rates()
     conc_tbl, steel_tbl, formwork_rate = _resolve_rates(db, request.region)
     concrete_rate = _rate(conc_tbl, mats.concrete_grade, 105000)
     steel_rate = _rate(steel_tbl, mats.steel_grade, 950000)
-    volume_concrete = request.geometry_thickness / 1000.0 * total_len   # m^3 for 1 m strip
+    volume_concrete = request.geometry_thickness / 1000.0 * total_len
     cost_concrete = volume_concrete * concrete_rate
     as_span = max((s.bar.As_prov for s in res.spans if s.bar), default=0.0)
     as_supp = max((s.bar.As_prov for s in res.supports if s.bar), default=0.0)
-    steel_weight = (as_span + as_supp) * total_len * 7850 / 1e6           # kg for 1 m strip
+    steel_weight = (as_span + as_supp) * total_len * 7850 / 1e6
     cost_steel = steel_weight * steel_rate / 1000
     cost_formwork = total_len * formwork_rate
     total_cost = cost_concrete + cost_steel + cost_formwork
@@ -90,7 +109,7 @@ def calculate_continuous_slab(request: ContinuousSlabRequest) -> ContinuousSlabR
     util = min(gov_span.As_req / gov_bar.As_prov, 1.0) if (gov_bar and gov_bar.As_prov) else 0.0
 
     summary = DesignSummary(
-        status=res.overall_status, slab_type="Continuous One-Way Slab",
+        status=overall, slab_type="Continuous One-Way Slab",
         continuity=f"{res.n_spans} spans ({_enum(request.start_support)}–{_enum(request.end_support)})",
         span_lx=request.span_lengths[0], span_ly=total_len,
         thickness=request.geometry_thickness, effective_depth=round(res.d_mm, 1), clear_cover=round(res.cover_mm, 1),
@@ -146,6 +165,7 @@ def calculate_continuous_slab(request: ContinuousSlabRequest) -> ContinuousSlabR
                          ratio=round(res.actual_slenderness / res.slenderness_limit, 2) if res.slenderness_limit else 0, limit=1.0),
          ComplianceCheck(check="Shear (v_Ed / v_Rd,c)", status=res.shear_status,
                          ratio=round(res.v_ed / res.v_rdc, 2) if res.v_rdc else 0, limit=1.0)]
+        + dfc_checks
     )
 
     cost_breakdown = CostBreakdown(
@@ -162,7 +182,7 @@ def calculate_continuous_slab(request: ContinuousSlabRequest) -> ContinuousSlabR
         sfd=[round(v, 2) for v in res.sfd_kN],
     )
 
-    report = _build_report(request, res)
+    report = _front_matter(request, res, compliance) + _build_report(request, res, dfc_rows, dfc_checks, overall)
 
     return ContinuousSlabResult(
         task_id="completed", status="completed", summary=summary, envelope=envelope,
@@ -171,7 +191,199 @@ def calculate_continuous_slab(request: ContinuousSlabRequest) -> ContinuousSlabR
     )
 
 
-def _build_report(request, res):
+def _s_max_7_3N(sigma_s, w_col):
+    """Max bar spacing from EC2 Table 7.3N, linear between rows. w_col: 1 = 0.4 mm,
+    2 = 0.3 mm, 3 = 0.2 mm. Returns 0 where the table gives no permitted spacing."""
+    rows = [(r[0], r[w_col]) for r in CRACK_TABLE_7_3N]
+    if sigma_s <= rows[0][0]:
+        return float(rows[0][1])
+    for (s1, v1), (s2, v2) in zip(rows, rows[1:]):
+        if sigma_s <= s2:
+            if v1 is None or v2 is None:
+                return 0.0
+            return v1 + (v2 - v1) * (sigma_s - s1) / (s2 - s1)
+    return 0.0
+
+
+def _durability_fire_crack(request, res):
+    """
+    Cover for exposure (EC2 4.4.1), fire resistance by tabulated data
+    (EN 1992-1-2 Table 5.8) and crack control without direct calculation
+    (EC2 7.3.3). Returns report rows plus one compliance entry per check;
+    each check also feeds the overall PASS/FAIL.
+    """
+    R = lambda ref, calc, out: {"reference": ref, "calculation": calc, "output": out}
+    dp = request.design_params
+    h = request.geometry_thickness
+    exposure = _enum(dp.exposure_class)
+    c_nom_prov = res.cover_mm                      # clear cover + the fixed 5 mm the engine adds
+    dc_dev = res.cover_mm - request.clear_cover    # = 5 mm
+    located = [(f"Span {s.index}", s, s.M_sag_kNm) for s in res.spans] + \
+              [(sp.position, sp, sp.M_hog_kNm) for sp in res.supports if sp.M_hog_kNm > 0.01]   # pinned ends come back as ~1e-15, not 0
+    phi_max = max((x.bar.bar_dia for x in list(res.spans) + list(res.supports) if x.bar), default=12)
+    phi_bot = max((s.bar.bar_dia for s in res.spans if s.bar), default=12)
+    rows, checks = [], []
+
+    # ---- cover for durability and bond ----
+    c_min_b = float(phi_max)
+    c_min_dur = EXPOSURE_MIN_DUR_MM.get(exposure, 20.0)
+    c_min = max(c_min_b, c_min_dur, 10.0)
+    c_nom_req = c_min + dc_dev
+    cov_ok = c_nom_prov >= c_nom_req - 1e-6
+    rows += [
+        R("EC2 4.4.1.2(3)", f"c_min,b = largest bar φ = {phi_max:.0f} mm", f"c_min,b = {c_min_b:.0f} mm"),
+        R("EC2 4.4.1.2(5)", f"c_min,dur for exposure {exposure} (same table as the two-way slab module; at or above Table 4.4N S4 in every class)", f"c_min,dur = {c_min_dur:.0f} mm"),
+        R("EC2 Eq. 4.2", f"c_min = max(c_min,b ; c_min,dur ; 10) = max({c_min_b:.0f} ; {c_min_dur:.0f} ; 10)", f"c_min = {c_min:.0f} mm"),
+        R("EC2 4.4.1.3", f"c_nom,req = c_min + Δc_dev = {c_min:.0f} + {dc_dev:.0f}  vs  c_nom,prov = {request.clear_cover:.0f} + {dc_dev:.0f} = {c_nom_prov:.0f} mm",
+          "PASS" if cov_ok else f"FAIL -- increase clear cover to ≥ {c_min:.0f} mm"),
+    ]
+    checks.append(ComplianceCheck(check=f"Cover for exposure {exposure}", status="PASS" if cov_ok else "FAIL",
+                                  ratio=round(c_nom_req / c_nom_prov, 2) if c_nom_prov else 0, limit=1.0))
+
+    # ---- fire resistance, tabulated data ----
+    R_min = int(dp.fire_rating or 0)
+    if R_min <= 0:
+        rows.append(R("EN 1992-1-2", "no fire resistance period specified", "not checked"))
+    else:
+        key = next((k for k in sorted(FIRE_TABLE_5_8) if k >= R_min), None)
+        if key is None:
+            rows.append(R("EN 1992-1-2 Table 5.8", f"REI {R_min} is beyond the table (max REI 240)", "FAIL -- outside tabulated data"))
+            checks.append(ComplianceCheck(check=f"Fire REI {R_min}", status="FAIL", ratio=0, limit=1.0))
+        else:
+            hs, a_req = FIRE_TABLE_5_8[key]
+            a_prov = c_nom_prov + phi_bot / 2.0
+            fire_ok = h >= hs and a_prov >= a_req - 1e-6
+            rows += [
+                R("EN 1992-1-2 Table 5.8", f"one-way solid slab, REI {key}" + (f" (next tabulated period above REI {R_min})" if key != R_min else ""), f"h_s ≥ {hs} mm ; a ≥ {a_req} mm"),
+                R("EN 1992-1-2 5.7.3(1)", "Table 5.8 applies to continuous slabs; this design uses linear elastic moments with no redistribution", "applies"),
+                R("Thickness", f"h = {h:.0f} mm vs h_s = {hs} mm", "PASS" if h >= hs else "FAIL"),
+                R("Axis distance", f"a = c_nom + φ/2 = {c_nom_prov:.0f} + {phi_bot:.0f}/2 = {a_prov:.0f} mm vs a = {a_req} mm (bottom span bars)",
+                  "PASS" if a_prov >= a_req - 1e-6 else "FAIL"),
+            ]
+            if key >= 90:
+                rows.append(R("EN 1992-1-2 5.7.3(3)", "REI ≥ 90: top reinforcement over each intermediate support should extend ≥ 0.3·l_eff from the support centre", "detailing -- not checked"))
+            checks.append(ComplianceCheck(check=f"Fire REI {key} (Table 5.8)", status="PASS" if fire_ok else "FAIL",
+                                          ratio=round(max(hs / h, a_req / a_prov), 2), limit=1.0))
+
+    # ---- crack control without direct calculation ----
+    w_user = float(dp.crack_width_limit or 0.3)
+    w_rec = W_MAX_7_1N.get(exposure, 0.3)
+    w_lim = min(w_user, w_rec)
+    occ = (getattr(request, "occupancy", None) or "").strip().lower()
+    psi2 = PSI2_BY_OCCUPANCY.get(occ, PSI2_UNSTATED)
+    qp_ratio = (res.g_k + psi2 * res.q_k) / res.w_ed if res.w_ed else 0.0
+    w_col = 1 if w_lim >= 0.4 else 2 if w_lim >= 0.3 else 3 if w_lim >= 0.2 else None
+    exempt = h <= 200 and w_lim >= w_rec
+    rows += [
+        R("EC2 Table 7.1N", f"recommended w_max for {exposure} = {w_rec} mm ; limit entered = {w_user} mm", f"w_lim = {w_lim} mm (stricter of the two)"),
+        R("EN 1990 Table A1.1", (f"occupancy '{occ}': ψ2 = {psi2}" if occ in PSI2_BY_OCCUPANCY else f"occupancy not stated: ψ2 = {psi2} assumed (categories C/D/F) -- choose an occupancy for A/B (0.3) or storage (0.8)"), f"ψ2 = {psi2}"),
+        R("Quasi-permanent", f"(G_k + ψ2·Q_k)/w_Ed = ({res.g_k:.2f} + {psi2}×{res.q_k:.2f})/{res.w_ed:.2f}", f"= {qp_ratio:.3f}"),
+    ]
+    if w_col is None:
+        rows.append(R("EC2 7.3.3", f"w_lim = {w_lim} mm is below the 0.2 mm column of Table 7.3N; needs a direct crack-width calculation (EC2 7.3.4), not implemented", "FAIL -- not covered"))
+        checks.append(ComplianceCheck(check=f"Crack control (w ≤ {w_lim} mm)", status="FAIL", ratio=0, limit=1.0))
+    else:
+        worst, crack_ok = 0.0, True
+        for label, x, M in located:
+            if not x.bar or not x.z_mm:
+                continue
+            sigma = (M * qp_ratio * 1e6) / (x.z_mm * x.bar.As_prov) if M > 0 else 0.0
+            s_max = _s_max_7_3N(sigma, w_col)
+            ok = s_max > 0 and x.bar.spacing <= s_max + 1e-6
+            crack_ok = crack_ok and ok
+            worst = max(worst, x.bar.spacing / s_max if s_max else 9.99)
+            rows.append(R(f"Table 7.3N -- {label}",
+                          f"σ_s = M_Ed·(qp)/(z·A_s,prov) = {M:.2f}×{qp_ratio:.3f}×10⁶/({x.z_mm:.0f}×{x.bar.As_prov:.0f}) = {sigma:.0f} MPa → s_max = {s_max:.0f} mm ; provided T{x.bar.bar_dia}@{x.bar.spacing}",
+                          ("PASS" if ok else "FAIL") + (" (for information)" if exempt else "")))
+        if exempt:
+            rows.append(R("EC2 7.3.3(1)", f"h = {h:.0f} mm ≤ 200 mm and w_lim is the Table 7.1N value: no specific measures to control cracking are necessary (detailing to EC2 9.3)", "PASS"))
+            status = "PASS"
+        else:
+            status = "PASS" if crack_ok else "FAIL"
+        checks.append(ComplianceCheck(check=f"Crack control (w ≤ {w_lim} mm)", status=status,
+                                      ratio=0 if exempt else round(worst, 2), limit=1.0))
+    return rows, checks
+
+
+def _front_matter(request, res, compliance):
+    """
+    REPORT IDENTIFICATION, 0. DESIGN BASIS AND SCOPE and 0b. NATIONALLY
+    DETERMINED PARAMETERS USED, laid out as in the column report (see
+    report_front_matter.py), stating what this engine actually does.
+    """
+    dp = request.design_params
+    exposure = _enum(dp.exposure_class)
+    n = res.n_spans
+    ends = f"{_enum(request.start_support)} to {_enum(request.end_support)}"
+    c_min_dur = EXPOSURE_MIN_DUR_MM.get(exposure, 20.0)
+    return front_matter(
+        member="SLAB", member_label="not entered (slab strips have no ID field)",
+        design=(f"Continuous one-way solid slab, {n} spans ({ends}), "
+                f"spans {', '.join(f'{L:.2f}' for L in request.span_lengths)} m, "
+                f"h = {request.geometry_thickness:.0f} mm, designed as a 1 m strip."),
+        design_tag="continuous",
+        checks=[(c.check, c.ratio, c.status) for c in compliance],
+        design_basis=request.design_basis,
+        module="continuous slab",
+        used_for=("moment and shear envelopes from pattern loading, span and support "
+                  "reinforcement, minimum steel, deflection by span/depth ratio, shear without "
+                  "shear reinforcement, cover for exposure, fire resistance by tabulated data and "
+                  "crack control by bar spacing, for one 1 m strip."),
+        basis_of_design=(f"Uniformly distributed load on a 1 m strip continuous over {n} spans. "
+                         "Linear elastic analysis by the direct stiffness method with no "
+                         "redistribution; envelope over the load patterns of section 4. Flexure by "
+                         "the K-method (Cl. 6.1), minimum steel by Cl. 9.2.1.1, deflection by "
+                         "span/effective depth on the governing span (Cl. 7.4.2), shear without "
+                         "shear reinforcement at d from the support face (Cl. 6.2.1(8), 6.2.2), "
+                         "cover by Cl. 4.4.1, fire by EN 1992-1-2 Table 5.8, crack control by "
+                         "Cl. 7.3.3."),
+        load_path=("The strip spans one way over its supports, taken as rigid line supports that "
+                   "do not settle, with the end conditions entered. The supporting beams or walls "
+                   "are not designed here. Lateral stability is not assessed."),
+        loading=("Loaded spans 1.35 Gk + 1.5 Qk, unloaded spans 1.35 Gk (Cl. 5.1.3(1)P). "
+                 "Patterns: all spans loaded, alternate spans loaded, and each pair of adjacent "
+                 "spans loaded (section 4); not every combination. Area loads only."),
+        not_assessed=("punching and concentrated loads; openings; curtailment of top steel "
+                      "(including the 0.3 l_eff extension for REI 90 and above); the supporting "
+                      "beams, walls and columns; disproportionate collapse (Approved Document A); "
+                      "lateral stability."),
+        verification=[
+            ("Verification, analysis",
+             "The moment solver reproduces textbook continuous-beam coefficients: 2 equal spans, "
+             "support -wL^2/8 and span 9wL^2/128; 3 equal spans, support -wL^2/10 and end span "
+             "0.080wL^2.", "coefficients"),
+            ("Verification, hand checks",
+             "Hand checks made during development: 3 spans of 4 m, h = 200 mm (support and span "
+             "moments and shears); unequal spans against an independent solver; the cover, fire "
+             "and crack checks of section 10b (3 October 2026). These are development records, "
+             "not a published worked example.", "recorded"),
+        ],
+        ndp_rows=ndp_partial_factors() + [ndp_alpha_cc_k_method()]
+                 + ndp_cover_rows(
+                     f"c_min,dur = {c_min_dur:.0f} mm for {exposure}, from the software's own table "
+                     "(XC1 20, XC2 25, XC3 30, XC4 35 mm), at or above Table 4.4N at structural "
+                     "class S4 in every class. Checked in section 10b. Not the UK NA basis.")
+                 + [ndp_min_steel(), ndp_shear_no_links(), ndp_deflection(),
+                    _fm_row("EN 1992-1-1 Cl. 5.1.3(1)P",
+                            "Load arrangements: alternate spans loaded and any two adjacent spans "
+                            "loaded (the recommended set), plus all spans loaded. The UK NA value "
+                            "was not checked here.", "EN text"),
+                    _fm_row("EN 1992-1-2 Table 5.8",
+                            "Minimum thickness h_s and axis distance a for one-way slabs, "
+                            "recommended values. The UK NA to EN 1992-1-2 was not checked here.",
+                            "EN text"),
+                    _fm_row("EN 1992-1-1 Table 7.1N, 7.3N",
+                            "w_max = 0.4 mm (XC1), 0.3 mm (XC2 to XC4); maximum bar spacing from "
+                            "Table 7.3N. Recommended values; the UK NA value was not checked here.",
+                            "EN text"),
+                    _fm_row("EN 1990 Table A1.1",
+                            f"psi_2 from the occupancy entered, or {PSI2_UNSTATED} where none is "
+                            "stated. Recommended values; the UK NA to EN 1990 was not checked here.",
+                            "EN text")],
+    )
+
+
+def _build_report(request, res, dfc_rows, dfc_checks, overall):
     R = lambda ref, calc, out: {"reference": ref, "calculation": calc, "output": out}
     fyd = res.fyk / 1.15
     fcd = res.fck / 1.5
@@ -204,6 +416,7 @@ def _build_report(request, res):
     # ---------------- 4. Load patterns considered ----------------
     pattern_rows = [
         R("UK/EC2 practice", "the moment envelope must come from load patterns, not a single all-spans-loaded case -- an unloaded alternate span can govern sagging elsewhere, and a support between two loaded (with adjacent unloaded) spans can govern hogging there", f"{len(res.load_patterns_used)} patterns considered"),
+        R("EC2 §5.1.3(1)P", f"loaded span: 1.35·G_k + 1.50·Q_k = {res.w_ed:.2f} kN/m² ; unloaded span: 1.35·G_k = 1.35 × {res.g_k:.2f} = {1.35 * res.g_k:.2f} kN/m² (permanent load is always present, never zero)", "γ_G = 1.35 on every span"),
     ]
     for lbl in res.load_patterns_used:
         pattern_rows.append(R("Pattern", lbl, "solved"))
@@ -275,7 +488,7 @@ def _build_report(request, res):
         R("Basic span/depth ratio", f"ρ₀ = 10⁻³ × √f_ck = 10⁻³ × √{res.fck:.0f}", f"ρ₀ = {res.rho0:.5f}"),
         R("Branch", f"ρ = {res.rho:.5f} vs ρ₀ = {res.rho0:.5f}", f"branch {branch}"),
         R("EC2 §7.4.2", ("(L/d) = K[11 + 1.5√f_ck·(ρ₀/ρ) + 3.2√f_ck·(ρ₀/ρ − 1)^1.5]" if res.rho <= res.rho0
-                         else "(L/d) = K[11 + 1.5√f_ck]"),
+                         else "(L/d) = K[11 + 1.5√f_ck·ρ₀/ρ]  (Eq. 7.16b, ρ' = 0)"),
           f"(L/d)_basic = {res.ld_basic:.2f}"),
         R("Actual deflection", f"(L/d)_actual = L/d = {gov_span.length_m*1000:.0f}/{d:.0f}", f"{res.actual_slenderness:.2f}"),
         R("Base check", f"(L/d)_actual {'≤' if res.deflection_base_status == 'PASS' else '>'} (L/d)_basic (before any enhancement) → {res.actual_slenderness:.2f} {'≤' if res.deflection_base_status == 'PASS' else '>'} {res.ld_basic:.2f}", res.deflection_base_status),
@@ -303,7 +516,7 @@ def _build_report(request, res):
     ]
     for sp in res.supports:
         if sp.shear_kN:
-            shear_rows.append(R(sp.position, f"V_face = {sp.shear_kN:.2f} kN [{sp.governing_pattern}] → V_Ed = {sp.shear_reduced_kN:.2f} kN", ""))
+            shear_rows.append(R(sp.position, f"V_face = {sp.shear_kN:.2f} kN [{sp.shear_pattern}] → V_Ed = {sp.shear_reduced_kN:.2f} kN", ""))
     shear_rows += [
         R("Steel ratio", f"ρ_i = A_s,provided/(b·d) = {as_prov_gov:.0f}/({b:.0f}×{d:.0f})  (≤ 0.02)", f"ρ_i = {rho_l:.5f}"),
         R("Size factor", f"k = 1 + √(200/d) = 1 + √(200/{d:.0f})  (≤ 2.0)", f"k = {k_sh:.3f}"),
@@ -315,6 +528,9 @@ def _build_report(request, res):
     ]
     sec.append({"title": "10. Shear (EC2 6.2.2, with reduction at support)", "rows": shear_rows})
 
+    # ---------------- 10b. Durability, fire and crack control ----------------
+    sec.append({"title": "10b. Durability, Fire and Crack Control", "rows": dfc_rows})
+
     # ---------------- 11. Checks & Notes -- itemized, so a FAIL is always traceable ----------------
     check_rows = []
     for s in res.spans:
@@ -323,8 +539,10 @@ def _build_report(request, res):
         check_rows.append(R(f"Flexure — {sp.position}", f"A_s,req {sp.As_req:.0f} vs A_s,prov {sp.bar.As_prov:.0f}" if sp.bar else "no bar selected", sp.status))
     check_rows.append(R("Deflection", f"(L/d) actual {res.actual_slenderness:.1f} vs allowable {res.slenderness_limit:.1f}", res.deflection_status))
     check_rows.append(R("Shear", f"v_Ed {res.v_ed:.3f} vs v_Rd,c {res.v_rdc:.3f} MPa", res.shear_status))
+    for c in dfc_checks:
+        check_rows.append(R(c.check, "see section 10b", c.status))
     failed = [r["reference"] for r in check_rows if r["output"] == "FAIL"]
-    check_rows.append(R("Overall", "FAILED checks: " + (", ".join(failed) if failed else "none") if res.overall_status == "FAIL" else "all checks pass", res.overall_status))
+    check_rows.append(R("Overall", "FAILED checks: " + (", ".join(failed) if failed else "none") if overall == "FAIL" else "all checks pass", overall))
     for n in res.notes:
         check_rows.append(R("Note", n, ""))
     sec.append({"title": "11. Checks & Notes", "rows": check_rows})

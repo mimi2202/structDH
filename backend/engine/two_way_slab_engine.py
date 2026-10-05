@@ -702,8 +702,13 @@ class TwoWaySlabDesigner:
         res.rho = res.As_req_x_main / (1000.0 * res.d_mm) if res.d_mm else 0.0
         res.rho_0 = 1e-3 * math.sqrt(self.material.fck)
         safe_rho = res.rho if res.rho > 0 else 1e-9
-        res.l_over_d_lim_branch_A = res.K_deflection * (11.0 + 1.5 * math.sqrt(self.material.fck) * (res.rho_0 / safe_rho))
-        res.l_over_d_lim_branch_B = res.K_deflection * (11.0 + 1.5 * math.sqrt(self.material.fck))
+        # EC2 Eq. 7.16a (rho <= rho0) and 7.16b with rho' = 0 (rho > rho0). Branch A
+        # was missing the 3.2 sqrt(fck)(rho0/rho - 1)^1.5 term (conservative) and
+        # branch B was missing rho0/rho (unconservative).
+        sqrt_fck = math.sqrt(self.material.fck)
+        res.l_over_d_lim_branch_A = res.K_deflection * (11.0 + 1.5 * sqrt_fck * (res.rho_0 / safe_rho)
+                                                        + 3.2 * sqrt_fck * max(res.rho_0 / safe_rho - 1.0, 0.0) ** 1.5)
+        res.l_over_d_lim_branch_B = res.K_deflection * (11.0 + 1.5 * sqrt_fck * (res.rho_0 / safe_rho if res.rho > 0 else 1.0))
         res.l_over_d_lim_basic = res.l_over_d_lim_branch_A if res.rho <= res.rho_0 else res.l_over_d_lim_branch_B
 
         # Two-stage deflection check (matches the one-way engine): F3 is only

@@ -16,8 +16,22 @@ from models.beam_schemas import (
     ReportRow, ReportSection,
 )
 from engine.beam_ss_engine import BeamInput, design_ss_beam
+from services.report_front_matter import (
+    front_matter, ndp_partial_factors, ndp_alpha_cc_k_method, ndp_cover_rows,
+    ndp_min_steel, ndp_shear_no_links, ndp_deflection, row as _fm_row,
+)
+
+# Shared by both beam reports' 'Not assessed by this tool' row.
+BEAM_COMMON_OUT = (
+    "cover for durability against an exposure class; fire resistance (EN 1992-1-2); "
+    "torsion; lateral stability of the beam (Cl. 5.9); anchorage, laps and "
+    "curtailment; shear between web and flange (Cl. 6.2.4); the supporting columns or "
+    "walls; disproportionate collapse (Approved Document A); lateral stability of the "
+    "structure"
+)
 
 PI = math.pi
+
 
 # EC2 Table 7.4N structural system factor K -- same convention already
 # established for the slab engines: 1.0 simply supported / 1.3 end span
@@ -37,6 +51,61 @@ SUPPORT_COEFFS = {
     "one_fixed_one_simple": (1 / 8, 5 / 8, "Propped Cantilever"),
     "one_fixed_one_free": (1 / 2, 1.0, "Cantilever"),
 }
+
+
+def _front_matter(request, support_label, b, h, L, beff, checks):
+    """
+    REPORT IDENTIFICATION, 0. DESIGN BASIS AND SCOPE and 0b. NATIONALLY
+    DETERMINED PARAMETERS USED, laid out as in the column report (see
+    report_front_matter.py), stating what beam_ss_engine actually does.
+    """
+    section_kind = f"T-beam, b_eff = {beff:.0f} mm" if beff > b else "rectangular section"
+    return front_matter(
+        member=request.beam_id, member_label=request.beam_id,
+        design=f"{support_label} beam, {b:.0f} x {h:.0f} mm, span {L:.2f} m, {section_kind}.",
+        design_tag="single span",
+        checks=checks, design_basis=request.design_basis, module="beam (single span)",
+        used_for=("design moment and shear for the support condition selected, flexure, minimum "
+                  "steel, bar selection, shear links, deflection by span/depth ratio and a "
+                  "simplified crack width, for one beam."),
+        basis_of_design=("Uniformly distributed load on one span. M_Ed and V_Ed from closed-form "
+                         "coefficients for the support condition selected (section 4). Flexure by "
+                         "the K-method on b_eff (Cl. 5.3.2.1, 6.1), minimum steel by Cl. 9.2.1.1, "
+                         "shear by Cl. 6.2.2 with links where V_Ed > V_Rd,c (s = A_sw z f_ywd/V_Ed, "
+                         "that is cot theta = 1), deflection by span/effective depth (Cl. 7.4.2), "
+                         "crack width by a simplified Cl. 7.3.4 calculation."),
+        load_path=("Load from the slab and walls is entered as a uniform line load on the beam, "
+                   "which carries it to supports taken as given by the support condition entered. "
+                   "The supporting columns or walls are not designed here. Lateral stability is "
+                   "not assessed."),
+        loading=("One load case: 1.35 Gk + 1.5 Qk over the span (Eq. 6.10), "
+                 + ("self-weight included in Gk. " if request.loads.self_weight_auto
+                    else "self-weight excluded at the user's request. ")
+                 + "Uniform loads only; no point loads."),
+        not_assessed=("V_Rd,max (strut crushing); " + BEAM_COMMON_OUT + "."),
+        verification=[("Verification",
+                       "The section design engine records that it was validated against a source "
+                       "worked example (span 6 m, 225 x 450 mm, f_ck = 30). The source is not named "
+                       "in the software and the compared values are not recorded.",
+                       "source not named")],
+        ndp_rows=ndp_partial_factors()
+                 + [ndp_alpha_cc_k_method(" The f_cd = f_ck/1.5 printed in section 2 (alpha_cc = 1.0) "
+                                          "is not used by the flexure calculation.")]
+                 + ndp_cover_rows("Not applied: the beam takes the clear cover entered and does not "
+                                  "check it against an exposure class.")
+                 + [ndp_min_steel(), ndp_shear_no_links(),
+                    _fm_row("EN 1992-1-1 Cl. 6.2.3, 9.2.2(6)",
+                            "Links: cot theta = 1, z = 0.9d, f_ywd = f_yk/1.15. s_l,max = 0.75d, "
+                            "capped at 300 mm by the software. Minimum link ratio (Cl. 9.2.2(5)) "
+                            "is not checked. Recommended values; the UK NA value was not checked here.",
+                            "EN text"),
+                    ndp_deflection(),
+                    _fm_row("EN 1992-1-1 Cl. 7.3.4",
+                            "k1 = 0.8, k2 = 0.5, k3 = 3.4, k4 = 0.425, k_t = 0.4, psi_2 = 0.3, "
+                            "w_max = 0.30 mm (Table 7.1N). k3, k4 and w_max are nationally "
+                            "determined; the UK NA values were not checked here.",
+                            "EN text")],
+    )
 
 
 def _enum(v):
@@ -186,7 +255,15 @@ def calculate_beam_design(request: BeamDesignRequest) -> BeamDesignResult:
         "Dimensions in mm; forces in kN and kNm.",
     ]
 
-    report = [
+    checks = [
+        ("Bending", util_bend, "PASS" if util_bend <= 1 else "FAIL"),
+        # with links designed, V_Ed/V_Rd,c above 1 is expected, not a utilisation
+        ("Shear", None if sh["links_required"] else util_shear, "PASS" if shear_status_ok else "FAIL"),
+        ("Deflection (span/depth)", defl["actual_Ld"] / defl["allowable_Ld"] if defl["allowable_Ld"] else None, defl_status),
+        ("Crack width", crack / crack_limit, crack_status),
+    ]
+    report = [ReportSection(title=sec["title"], rows=[ReportRow(**x) for x in sec["rows"]])
+              for sec in _front_matter(request, support_label, b, h, L, beff, checks)] + [
         ReportSection(title=sec["section"],
                       rows=[ReportRow(reference=row["ref"], calculation=row["calc"], output=row["out"])
                             for row in sec["rows"]])

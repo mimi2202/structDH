@@ -8,6 +8,7 @@ import {
   FiArrowRight, FiCheck, FiLoader, FiAlertTriangle,
 } from "react-icons/fi";
 import { slabAPI } from "../services/api";
+import DesignProgressBar from "../components/ui/DesignProgressBar";
 
 const INPUT_DRAFT_KEY = "structuralInputDraft";
 
@@ -54,20 +55,13 @@ const STEEL_GRADES = [
   { value: "B500", label: "B500B (fyk = 500 MPa)" },
   { value: "B460", label: "B460B (fyk = 460 MPa)" },
 ];
-// BS 8110 grade sets (used when design code = BS8110)
-const CONCRETE_GRADES_BS = [
-  { value: "M20", label: "M20 (fcu = 20 MPa)" },
-  { value: "M25", label: "M25 (fcu = 25 MPa)" },
-  { value: "M30", label: "M30 (fcu = 30 MPa)" },
-];
-const STEEL_GRADES_BS = [
-  { value: "Fe415", label: "Fe415 (fy = 415 MPa)" },
-  { value: "Fe500", label: "Fe500 (fy = 500 MPa)" },
-];
+// BS8110 and ACI318 are blocked server-side (models/schemas.py); the BS-only
+// grade sets and the multi-code dropdown that used to drive them are gone.
+// EC2 is the only code this page can produce, so it's shown as a fixed
+// label rather than a choice -- same treatment as the column and continuous
+// slab input pages.
 const DESIGN_CODES = [
   { value: "EC2", label: "EN 1992-1-1 (Eurocode 2)" },
-  { value: "BS8110", label: "BS 8110:1997" },
-  { value: "ACI318", label: "ACI 318" },
 ];
 const ANALYSIS_METHODS = [
   { value: "limit_state", label: "Limit State Method" },
@@ -134,6 +128,11 @@ const DEFAULTS = {
   crackWidthLimit: "0.3",
   fireRating: "60",
   deflectionLimit: "250",
+
+  // Printed on the first page of the Detailed Report. Blank stays blank.
+  designerName: "", designerQualifications: "",
+  checkedBy: "", checkerQualifications: "",
+  stabilityResponsible: "", independentCheck: "",
 };
 
 /* ================================================================== */
@@ -144,14 +143,19 @@ const StructuralInput = () => {
   const [formData, setFormData] = useState(() => {
     try {
       const saved = sessionStorage.getItem(INPUT_DRAFT_KEY);
-      return saved ? { ...DEFAULTS, ...JSON.parse(saved) } : DEFAULTS;
+      if (!saved) return DEFAULTS;
+      const parsed = JSON.parse(saved);
+      // BS8110/ACI318 are blocked server-side. A draft saved before that
+      // existed could still carry one, which would otherwise 422 silently
+      // until Reset is pressed -- normalize it here instead.
+      if (parsed.designCode && parsed.designCode !== "EC2") parsed.designCode = "EC2";
+      return { ...DEFAULTS, ...parsed };
     } catch {
       return DEFAULTS;
     }
   });
   const [isValidating, setIsValidating] = useState(false);
   const [isOptimising, setIsOptimising] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [error, setError] = useState(null);
 
   // Persist every change so navigating to /slab-results and back restores it.
@@ -167,20 +171,6 @@ const StructuralInput = () => {
   const twoWay = formData.slabType === "two-way";
   const continuityOptions = twoWay ? TWO_WAY_CONTINUITY : ONE_WAY_CONTINUITY;
   const continuityLabel = continuityOptions.find((o) => o.value === formData.continuity)?.label || "—";
-
-  // Grade sets follow the selected design code
-  const isBS = formData.designCode === "BS8110";
-  const concreteOptions = isBS ? CONCRETE_GRADES_BS : CONCRETE_GRADES;
-  const steelOptions = isBS ? STEEL_GRADES_BS : STEEL_GRADES;
-
-  const handleDesignCode = (codeVal) => {
-    const bs = codeVal === "BS8110";
-    set({
-      designCode: codeVal,
-      concreteGrade: bs ? "M25" : "C30/37",
-      steelGrade: bs ? "Fe500" : "B500",
-    });
-  };
 
   const handleSlabType = (type) =>
     set({ slabType: type, continuity: type === "two-way" ? "all_edges_continuous" : "simply_supported" });
@@ -237,16 +227,12 @@ const StructuralInput = () => {
     }
     setIsOptimising(true);
     setError(null);
-    setProgress(20);
     try {
-      setProgress(45);
       const result = await slabAPI.startDesign(formData);
-      setProgress(100);
       setIsOptimising(false);
       navigate("/slab-results", { state: { designResult: result, formData } });
     } catch (e) {
       setIsOptimising(false);
-      setProgress(0);
       setError(
         e.message === "Failed to fetch"
           ? "Cannot reach the design engine. Make sure the backend is running at http://localhost:8000"
@@ -269,17 +255,7 @@ const StructuralInput = () => {
               <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
             </div>
           )}
-          {isOptimising && (
-            <div className="mb-5">
-              <div className="mb-2 flex items-center gap-3">
-                <FiLoader className="animate-spin text-[#0A2F44] dark:text-[#66a4c2]" />
-                <span className={`text-sm ${SUB}`}>Running design optimisation…</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-gray-200 dark:bg-gray-700">
-                <div className="h-2 rounded-full bg-[#0A2F44] transition-all duration-500" style={{ width: `${progress}%` }} />
-              </div>
-            </div>
-          )}
+          <DesignProgressBar active={isOptimising} />
 
           {/* page title */}
           <div className="mb-5">
@@ -342,11 +318,11 @@ const StructuralInput = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className={LABEL}>Concrete Grade</label>
-                    <Dropdown value={formData.concreteGrade} onChange={(e) => set({ concreteGrade: e.target.value })} options={concreteOptions} />
+                    <Dropdown value={formData.concreteGrade} onChange={(e) => set({ concreteGrade: e.target.value })} options={CONCRETE_GRADES} />
                   </div>
                   <div>
                     <label className={LABEL}>Steel Grade</label>
-                    <Dropdown value={formData.steelGrade} onChange={(e) => set({ steelGrade: e.target.value })} options={steelOptions} />
+                    <Dropdown value={formData.steelGrade} onChange={(e) => set({ steelGrade: e.target.value })} options={STEEL_GRADES} />
                   </div>
                   <Field label="Unit Weight of Concrete" unit="kN/m³" value={formData.unitWeightConcrete} onChange={(v) => set({ unitWeightConcrete: v })} step="0.5" />
                   <Field label="Unit Weight of Steel" unit="kN/m³" value={formData.unitWeightSteel} onChange={(v) => set({ unitWeightSteel: v })} step="0.5" />
@@ -378,7 +354,9 @@ const StructuralInput = () => {
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                   <div>
                     <label className={LABEL}>Design Code</label>
-                    <Dropdown value={formData.designCode} onChange={(e) => handleDesignCode(e.target.value)} options={DESIGN_CODES} />
+                    <div className="flex h-[42px] items-center rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-3 font-mono text-sm">
+                      <span className={MAIN}>{DESIGN_CODES[0].label}</span>
+                    </div>
                   </div>
                   <div>
                     <label className={LABEL}>Analysis Method</label>
@@ -398,6 +376,49 @@ const StructuralInput = () => {
                       <Toggle checked={formData.serviceabilityCheck} onChange={(c) => set({ serviceabilityCheck: c })} />
                     </div>
                   </div>
+                </div>
+              </Section>
+
+              {/* 7. DESIGN BASIS */}
+              <Section n="7" title="Design Basis" optional>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><label className={LABEL}>Designed by</label>
+                    <input className={INPUT} value={formData.designerName} onChange={(e) => set({ designerName: e.target.value })} /></div>
+                  <div><label className={LABEL}>Designer's qualifications</label>
+                    <input className={INPUT} value={formData.designerQualifications} onChange={(e) => set({ designerQualifications: e.target.value })} /></div>
+                  <div><label className={LABEL}>Checked by</label>
+                    <input className={INPUT} value={formData.checkedBy} onChange={(e) => set({ checkedBy: e.target.value })} /></div>
+                  <div><label className={LABEL}>Checker's qualifications</label>
+                    <input className={INPUT} value={formData.checkerQualifications} onChange={(e) => set({ checkerQualifications: e.target.value })} /></div>
+                </div>
+                <div className="mt-4">
+                  <label className={LABEL}>Responsible for the stability of the structure</label>
+                  <input className={INPUT} value={formData.stabilityResponsible} onChange={(e) => set({ stabilityResponsible: e.target.value })} />
+                </div>
+                <div className="mt-4">
+                  <label className={LABEL}>Independent check</label>
+                  <div className="flex flex-wrap gap-2">
+                    {[["", "Not stated"], ["required", "Required"], ["completed", "Completed"]].map(([val, label]) => {
+                      const on = (formData.independentCheck || "") === val;
+                      return (
+                        <button key={label || "none"} type="button" onClick={() => set({ independentCheck: val })}
+                          className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                            on ? "border-[#0A2F44] bg-[#e6f0f5] text-[#0A2F44] dark:border-[#66a4c2] dark:bg-[#1e3a4a] dark:text-[#66a4c2]"
+                               : `border-[#e2e8f0] dark:border-[#334155] ${SUB} hover:border-[#94a3b8]`}`}>
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="mt-4 flex items-start gap-2 rounded-lg border-l-4 border-[#0A2F44] bg-[#e6f0f5] dark:bg-[#1e3a4a] p-3">
+                  <FiInfo className="mt-0.5 flex-shrink-0 text-[#0A2F44] dark:text-[#cce1eb]" />
+                  <p className="text-xs text-[#0A2F44] dark:text-[#cce1eb]">
+                    These are printed on the first page of the Detailed Report. Left blank, the report says "not entered".
+                    Nothing is filled in for you: who designed, who checked and whether an independent check is required
+                    or done are your statements, and building control asks for them with a submission. The independent
+                    check is never ticked automatically.
+                  </p>
                 </div>
               </Section>
             </div>

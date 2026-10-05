@@ -33,6 +33,11 @@ export default function FoundationResults() {
     );
   }
 
+  if (r.foundation_type === "combined") {
+    return <CombinedFootingResults r={r} meta={meta} navigate={navigate} sheetRef={sheetRef}
+      showReport={showReport} setShowReport={setShowReport} />;
+  }
+
   const pass = r.status === "PASS";
   const g = r.geometry, sp = r.soil_pressure, fx = r.flexure.x, fy = r.flexure.y;
   const sx = r.one_way_shear.x, sy = r.one_way_shear.y, pn = r.punching, u = r.utilisation;
@@ -45,12 +50,14 @@ export default function FoundationResults() {
           <button onClick={() => navigate("/foundation-input")} className={`flex items-center gap-2 text-sm ${SUB}`}>
             <FiArrowLeft size={16} /> Back to Input
           </button>
-          <button onClick={() => setShowReport(true)} className="flex items-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-4 py-2 text-sm text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#f1f5f9] dark:hover:bg-[#334155]">
-            <FiFileText size={15} /> Detailed Report
-          </button>
-          <button onClick={() => exportElementToPdf(sheetRef.current, "PadFoundation")} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
-            <FiDownload size={15} /> Download PDF
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setShowReport(true)} className="flex items-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-4 py-2 text-sm text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#f1f5f9] dark:hover:bg-[#334155]">
+              <FiFileText size={15} /> Detailed Report
+            </button>
+            <button onClick={() => exportElementToPdf(sheetRef.current, "PadFoundation")} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
+              <FiDownload size={15} /> Download PDF
+            </button>
+          </div>
         </div>
 
         {/* title + summary */}
@@ -215,6 +222,130 @@ function SoilPressure3D({ corners, g, allow }) {
   );
 }
 
+/* ---------- combined footing (two columns, one footing) ---------- */
+function CombinedFootingResults({ r, meta, navigate, sheetRef, showReport, setShowReport }) {
+  const pass = r.status === "PASS";
+  const col = r.columns, g = r.geometry, sp = r.soil_pressure;
+  const lo = r.longitudinal, tr = r.transverse, sh = r.shear, pn = r.punching, u = r.utilisation;
+
+  return (
+    <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#111827] px-6 py-6">
+      <div ref={sheetRef} className="mx-auto max-w-6xl space-y-5">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <button onClick={() => navigate("/foundation-input")} className={`flex items-center gap-2 text-sm ${SUB}`}>
+            <FiArrowLeft size={16} /> Back to Input
+          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setShowReport(true)} className="flex items-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-4 py-2 text-sm text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#f1f5f9] dark:hover:bg-[#334155]">
+              <FiFileText size={15} /> Detailed Report
+            </button>
+            <button onClick={() => exportElementToPdf(sheetRef.current, "CombinedFooting")} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
+              <FiDownload size={15} /> Download PDF
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5">
+          <div className={`${CARD} p-5`}>
+            <div className="text-xs text-[#94a3b8] uppercase tracking-wide mb-1">Foundation Design Output · EN 1992-1-1 + EN 1997-1</div>
+            <div className="flex items-baseline gap-3 flex-wrap">
+              <h1 className="text-2xl font-bold text-[#0A2F44] dark:text-[#66a4c2]">Combined Footing</h1>
+              <span className={`text-sm ${SUB}`}>{r.case_type}{meta.project ? ` · ${meta.project}` : ""}{meta.location ? ` · ${meta.location}` : ""}</span>
+            </div>
+            <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+              <Mini label="Footing" value={`${g.footing_length_mm}×${g.footing_width_mm}`} />
+              <Mini label="Thickness" value={`${g.footing_depth_mm} mm`} />
+              <Mini label="qmax" value={`${sp.qmax} kN/m²`} />
+              <Mini label="Overall util" value={`${u.overall_pct}%`} />
+            </div>
+          </div>
+
+          <div className={`rounded-xl border p-5 ${pass ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20" : "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20"}`}>
+            <div className={TITLE}>Summary of Results</div>
+            <div className="mt-3 flex items-center gap-3">
+              {pass ? <FiCheckCircle className="text-green-600 dark:text-green-400" size={32} /> : <FiXCircle className="text-red-600 dark:text-red-400" size={32} />}
+              <div className={`text-2xl font-bold ${pass ? "text-green-700 dark:text-green-300" : "text-red-700 dark:text-red-300"}`}>{pass ? "SAFE" : "UNSAFE"}</div>
+            </div>
+            <div className="mt-3 space-y-1.5">
+              <SumLine label="Bearing" value={`${u.bearing_pct}%`} warn={u.bearing_pct > 100} />
+              <SumLine label="Shear" value={`${u.shear_pct}%`} warn={u.shear_pct > 100} />
+              <SumLine label="Punching" value={`${u.punching_pct}%`} warn={u.punching_pct > 100} />
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <Panel title="Columns & Resultant">
+            <KV label="Column 1 (left)" value={`${col.column_1.axial_load_kN} kN, at ${col.column_1.position_m} m`} />
+            <KV label="Column 2 (right)" value={`${col.column_2.axial_load_kN} kN, at ${col.column_2.position_m} m`} />
+            <KV label="Spacing" value={`${col.spacing_m} m`} />
+            <KV label="Total load W" value={`${col.total_load_kN} kN`} strong />
+            <KV label="Resultant location" value={`${col.resultant_position_m} m from left edge`} />
+            <KV label="Mx,total / My,total" value={`${r.moments.Mx_total_kNm} / ${r.moments.My_total_kNm} kNm`} />
+          </Panel>
+
+          <Panel title="Geometry & Design Results">
+            <KV label="Footing" value={`${g.footing_length_mm} × ${g.footing_width_mm} mm`} />
+            <KV label="Thickness" value={`${g.footing_depth_mm} mm`} />
+            <KV label="Effective depth, long. / trans." value={`${g.d_long_mm} / ${g.d_trans_mm} mm`} />
+            <KV label="Max pressure qmax" value={`${sp.qmax} kN/m²`} strong warn={!sp.bearing_ok} />
+            <KV label="Min pressure qmin" value={`${sp.qmin} kN/m²`} warn={!sp.uplift_ok} />
+            <KV label="Allowable bearing" value={`${r.materials.allowable_bearing_kN_m2} kN/m²`} />
+          </Panel>
+        </div>
+
+        <Panel title="Flexural Reinforcement">
+          <Table
+            head={["Direction", "M (kNm)", "d (mm)", "As,req", "As,min", "As,prov", "Bar / Spacing", "Status"]}
+            rows={[
+              ["Longitudinal", lo.Mmax_kNm, lo.d_eff_mm, lo.As_req, lo.As_min, lo.As_provided, `Y${lo.bar_dia}@${lo.spacing_mm}`, <Badge key="lo" ok={lo.status === "OK"}>{lo.status}</Badge>],
+              ["Transverse", tr.M_kNm, tr.d_eff_mm, tr.As_req, tr.As_min, tr.As_provided, `Y${tr.bar_dia}@${tr.spacing_mm}`, <Badge key="tr" ok={tr.status === "OK"}>{tr.status}</Badge>],
+            ]}
+          />
+          <p className={`mt-2 text-xs ${SUB}`}>
+            Longitudinal moment is the governing value found along the footing length (max at {lo.location_m} m from the left edge),
+            not a simple column-face cantilever -- the soil pressure varies linearly along the length once there is a net moment.
+          </p>
+        </Panel>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <Panel title="Soil Pressure Distribution (Ultimate)">
+            <SoilPressure3D corners={sp.corners} g={g} allow={r.materials.allowable_bearing_kN_m2} />
+            <p className={`mt-2 text-xs ${SUB}`}>qmax {sp.qmax} / qmin {sp.qmin} kN/m². {sp.bearing_ok ? "Within allowable." : "Exceeds allowable bearing."}</p>
+          </Panel>
+
+          <Panel title="Shear Checks">
+            <Table
+              head={["Check", "VEd / vEd", "Resistance", "Status"]}
+              rows={[
+                ["One-way shear", `${sh.VEd_kN} kN`, `${sh.VRdc_kN} kN`, <Badge key="sh" ok={sh.status === "OK"}>{sh.status}</Badge>],
+                ["Punching (6.4)", `${pn.vEd_MPa} MPa`, `${pn.vRdc_MPa} MPa`, <Badge key="pn" ok={pn.status === "OK"}>{pn.status}</Badge>],
+              ]}
+            />
+            <p className={`mt-2 text-xs ${SUB}`}>Punching is checked around the more heavily loaded column.</p>
+          </Panel>
+        </div>
+
+        <Panel title="Design Summary">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <Chip label="Bearing" pct={u.bearing_pct} ok={sp.bearing_ok} />
+            <Chip label="One-way shear" ok={sh.status === "OK"} />
+            <Chip label="Punching" pct={u.punching_pct} ok={pn.status === "OK"} />
+            <Chip label="Reinforcement" ok={lo.status === "OK" && tr.status === "OK"} />
+            <Chip label="Uplift" ok={sp.uplift_ok} />
+          </div>
+        </Panel>
+
+        <p className={`text-xs ${SUB} text-center pt-2`}>
+          Computed per EN 1992-1-1 (§6.2, §6.4, §9.8) & EN 1997-1. Design on ULS loads. Validate against a trusted tool before real design.
+        </p>
+      </div>
+
+      {showReport && <ReportModal r={r} onClose={() => setShowReport(false)} title="Detailed Calculation Report — Combined Footing" />}
+    </div>
+  );
+}
+
 /* ---------- plan diagram ---------- */
 function PlanSVG({ g }) {
   const VB = 120, pad = 12, draw = VB - 2 * pad;
@@ -253,12 +384,12 @@ function RebarLayout({ g, fx, fy }) {
 }
 
 /* ---------- report modal ---------- */
-function ReportModal({ r, onClose }) {
+function ReportModal({ r, onClose, title }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className={`${CARD} max-h-[85vh] w-full max-w-3xl overflow-y-auto`} onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 flex items-center justify-between border-b border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1f2937] px-5 py-3">
-          <h3 className={TITLE}>Detailed Calculation Report — Pad Footing</h3>
+          <h3 className={TITLE}>{title || "Detailed Calculation Report — Pad Footing"}</h3>
           <button onClick={onClose} className={SUB}><FiX size={18} /></button>
         </div>
         <div className="p-5 space-y-5">

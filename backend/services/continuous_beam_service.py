@@ -12,6 +12,11 @@ from models.continuous_beam_schemas import (
     CBReaction, ReportRow, ReportSection,
 )
 from engine.beam_cont_engine import ContinuousBeamInput, design_continuous_beam
+from services.beam_service import BEAM_COMMON_OUT
+from services.report_front_matter import (
+    front_matter, ndp_partial_factors, ndp_alpha_cc_k_method, ndp_cover_rows,
+    ndp_min_steel, ndp_shear_no_links, ndp_deflection, row as _fm_row,
+)
 
 PI = math.pi
 
@@ -34,6 +39,59 @@ def parse_fck(g):
 def parse_fy(g):
     m = re.search(r"(\d+)", str(g))
     return float(m.group(1)) if m else 500.0
+
+
+def _front_matter(request, n, lengths, b, h, checks):
+    """
+    REPORT IDENTIFICATION, 0. DESIGN BASIS AND SCOPE and 0b. NATIONALLY
+    DETERMINED PARAMETERS USED, laid out as in the column report (see
+    report_front_matter.py), stating what beam_cont_engine actually does.
+    """
+    return front_matter(
+        member=request.beam_id, member_label=request.beam_id,
+        design=(f"Continuous beam, {n} spans ({', '.join(f'{L / 1000:.2f}' for L in lengths)} m), "
+                f"{b:.0f} x {h:.0f} mm, T-beam in the spans, rectangular at the supports."),
+        design_tag="continuous",
+        checks=checks, design_basis=request.design_basis, module="continuous beam",
+        used_for=("moments and shears by stiffness analysis, span and support reinforcement, "
+                  "minimum steel, shear links with the strut crushing check, and deflection by "
+                  "span/depth ratio, for one beam."),
+        basis_of_design=("Uniformly distributed load on each span. Linear elastic analysis by the "
+                         "direct stiffness method with no redistribution (section 4). Span flexure "
+                         "by the K-method on b_eff, support flexure on the web (Cl. 5.3.2.1, 6.1), "
+                         "minimum steel by Cl. 9.2.1.1, shear by Cl. 6.2.2 and links by Cl. 6.2.3 "
+                         "with cot theta = 2.5 and V_Rd,max, deflection by span/effective depth on "
+                         "the longest span (Cl. 7.4.2)."),
+        load_path=("Load from the slab and walls is entered as a uniform line load on each span. "
+                   "The supports are taken as rigid and do not settle. The supporting columns or "
+                   "walls are not designed here. Lateral stability is not assessed."),
+        loading=("One load case: 1.35 Gk + 1.5 Qk on every span at once (Eq. 6.10). Pattern "
+                 "loading (Cl. 5.1.3) is not applied, so sagging in a span next to a lightly loaded "
+                 "one, and some support moments, can be underestimated. Uniform loads only."),
+        not_assessed=("pattern loading; crack width (the results show 0.00 mm and PASS, but no "
+                      "crack calculation is made); " + BEAM_COMMON_OUT + "."),
+        verification=[("Verification",
+                       "No comparison with a published worked example is recorded for this module. "
+                       "Hand-check the moments, which come without pattern loading, before use.",
+                       "not recorded")],
+        ndp_rows=ndp_partial_factors()
+                 + [ndp_alpha_cc_k_method(" The f_cd = f_ck/1.5 printed in section 2 (alpha_cc = 1.0) "
+                                          "is used only for V_Rd,max; the UK NA gives 0.85 for "
+                                          "flexure and axial load and 1.0 for other phenomena.")]
+                 + ndp_cover_rows("Not applied: the beam takes the clear cover entered and does not "
+                                  "check it against an exposure class.")
+                 + [ndp_min_steel(), ndp_shear_no_links(),
+                    _fm_row("EN 1992-1-1 Cl. 6.2.3, 9.2.2",
+                            "Links: cot theta = 2.5, z = 0.9d, f_ywd = f_yk/1.15, nu_1 = "
+                            "0.6(1 - f_ck/250), alpha_cw = 1.0. rho_w,min = 0.08 sqrt(f_ck)/f_yk "
+                            "(Cl. 9.2.2(5)). s_l,max = 0.75d, capped at 300 mm by the software "
+                            "(Cl. 9.2.2(6)). Recommended values; the UK NA value was not checked here.",
+                            "EN text"),
+                    ndp_deflection(),
+                    _fm_row("EN 1992-1-1 Cl. 5.1.3(1)P",
+                            "Load arrangements are not applied: one arrangement, all spans loaded.",
+                            "not applied")],
+    )
 
 
 def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamResult:
@@ -253,6 +311,8 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
         "governing_span": defl.get("governing_span"), "rho": defl.get("rho"), "rho0": defl.get("rho0"),
         "K_sys": defl.get("K_sys"), "ld_basic": defl.get("ld_basic"),
         "base_status": defl.get("base_status"), "F3": defl.get("F3"), "enhanced": defl.get("enhanced"),
+        "ld_eq": defl.get("ld_eq"), "F1": defl.get("F1"), "cap_40K": defl.get("cap_40K"),
+        "spans": defl.get("spans", []),
     }
 
     comps = [
@@ -264,7 +324,11 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
         {"name": "Other Live Load", "kind": "LL", "value": round(request.loads.other_live_load, 2)},
     ]
 
-    report = []
+    checks = [("Bending", util_bend, "PASS" if bend_ok else "FAIL"),
+              ("Shear", util_shear, "PASS" if shear_ok else "FAIL"),
+              ("Deflection (span/depth)", defl["actual_Ld"] / defl["allowable_Ld"] if defl.get("allowable_Ld") else None, defl_status)]
+    report = [ReportSection(title=sec["title"], rows=[ReportRow(**x) for x in sec["rows"]])
+              for sec in _front_matter(request, n, lengths, b, h, checks)]
     for sec in r.get("report", []):
         rows = [ReportRow(reference=row["ref"], calculation=row["calc"], output=row["out"])
                 for row in sec["rows"]]

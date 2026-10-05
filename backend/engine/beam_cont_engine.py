@@ -318,34 +318,58 @@ def design_continuous_beam(d: ContinuousBeamInput) -> dict:
     # F3 = 1.069 lifted from the one worked example and never recomputed
     # from the beam's actual As,prov/As,req -- meaning it silently gave the
     # same "enhancement" regardless of what steel was actually provided.
-    gov_span_idx = spans.index(max(spans))
-    gov_span_label = f"Span {gov_span_idx + 1}"
-    gov_span = spans[gov_span_idx]
-    sd_gov = span_design.get(gov_span_label, {})
-    As_req_gov = sd_gov.get("As_req_mm2", As_min)
-    As_prov_gov = sd_gov.get("As_provided_mm2", As_min)
-
-    is_end_span = gov_span_idx == 0 or gov_span_idx == len(spans) - 1
-    K_sys = 1.3 if is_end_span else 1.5   # EC2 Table 7.4N: end span vs interior span
-
-    rho = As_req_gov / (d.bw_mm * d_mm) if d_mm else 0.0
+    # Every span is checked with its own K and A_s,req; the governing span is
+    # the one with the highest actual/allowable ratio. (Previously only the
+    # longest span was checked, so a shorter end span with K = 1.3 could
+    # govern unseen, and the report called the longest span the one with the
+    # "highest sagging demand", which it often is not.)
+    #   - EC2 Cl.7.4.2(2): flanged sections with b_eff/b_w > 3 -> x 0.8 (F1).
+    #   - Allowable capped at 40K, the Concrete Centre limit this engine used
+    #     before the switch to Eq. 7.16: at low rho Eq. 7.16a gives very large
+    #     ratios (154 for a lightly reinforced 6 m span) that mean nothing.
+    #   - F2 = 7/l_eff (spans > 7 m carrying brittle partitions) is not
+    #     applied: the engine is not told about partitions. Reported as such.
     rho0 = math.sqrt(d.fck) / 1000.0
-    if rho and rho <= rho0:
-        ld_basic = K_sys * (11 + 1.5 * math.sqrt(d.fck) * (rho0 / rho) + 3.2 * math.sqrt(d.fck) * max((rho0 / rho) - 1, 0.0) ** 1.5)
-    else:
-        ld_basic = K_sys * (11 + 1.5 * math.sqrt(d.fck))
-    actual_Ld = gov_span * 1000 / d_mm
-    deflection_base_status = "PASS" if actual_Ld <= ld_basic else "FAIL"
-    if deflection_base_status == "PASS":
-        F3 = 1.0
-        allowable_Ld = ld_basic
-        defl_ok = True
-        deflection_enhanced = False
-    else:
-        F3 = min(As_prov_gov / As_req_gov, 1.5) if As_req_gov else 1.0
-        allowable_Ld = ld_basic * F3
-        defl_ok = actual_Ld <= allowable_Ld
-        deflection_enhanced = True
+    n_sp = len(spans)
+    defl_spans = []
+    for i, L in enumerate(spans):
+        label = f"Span {i + 1}"
+        sd = span_design.get(label, {})
+        As_req_i = sd.get("As_req_mm2", As_min)
+        As_prov_i = sd.get("As_provided_mm2", As_min)
+        end_i = i == 0 or i == n_sp - 1
+        K_i = 1.0 if n_sp == 1 else (1.3 if end_i else 1.5)   # EC2 Table 7.4N
+        rho_i = As_req_i / (d.bw_mm * d_mm) if d_mm else 0.0
+        if rho_i and rho_i <= rho0:
+            eq_i = K_i * (11 + 1.5 * math.sqrt(d.fck) * (rho0 / rho_i) + 3.2 * math.sqrt(d.fck) * max((rho0 / rho_i) - 1, 0.0) ** 1.5)
+        else:
+            # Eq. 7.16b with no compression steel (rho' = 0): K[11 + 1.5 sqrt(fck) rho0/rho].
+            # Was K(11 + 1.5 sqrt(fck)), dropping rho0/rho (< 1 here): unconservative.
+            eq_i = K_i * (11 + 1.5 * math.sqrt(d.fck) * (rho0 / rho_i))
+        beff_i = beff.get(label, d.bw_mm)
+        F1_i = 0.8 if beff_i / d.bw_mm > 3 else 1.0
+        cap_i = 40.0 * K_i
+        basic_i = min(eq_i * F1_i, cap_i)
+        actual_i = L * 1000 / d_mm
+        base_i = "PASS" if actual_i <= basic_i else "FAIL"
+        if base_i == "PASS":
+            F3_i = 1.0
+        else:
+            F3_i = min(As_prov_i / As_req_i, 1.5) if As_req_i else 1.0
+        allow_i = min(eq_i * F1_i * F3_i, cap_i)
+        defl_spans.append({
+            "span": label, "L_m": L, "end": end_i, "K": K_i, "As_req": As_req_i, "As_prov": As_prov_i,
+            "rho": rho_i, "eq": eq_i, "beff": beff_i, "F1": F1_i, "cap": cap_i, "capped": eq_i * F1_i * F3_i > cap_i,
+            "basic": basic_i, "actual": actual_i, "base": base_i, "F3": F3_i, "allowable": allow_i,
+            "ok": actual_i <= allow_i, "ratio": actual_i / allow_i if allow_i else 9.99,
+        })
+    g = max(defl_spans, key=lambda x: x["ratio"])
+    gov_span_label, gov_span, is_end_span, K_sys = g["span"], g["L_m"], g["end"], g["K"]
+    As_req_gov, rho, F1_defl, defl_cap = g["As_req"], g["rho"], g["F1"], g["cap"]
+    ld_eq, ld_basic, actual_Ld = g["eq"], g["basic"], g["actual"]
+    deflection_base_status, F3, allowable_Ld = g["base"], g["F3"], g["allowable"]
+    deflection_enhanced = g["base"] == "FAIL"
+    defl_ok = all(x["ok"] for x in defl_spans)
 
     checks = {
         "flexure_supports": bool(all(v["status"] == "OK" for v in support_design.values())),
@@ -518,18 +542,29 @@ def design_continuous_beam(d: ContinuousBeamInput) -> dict:
                    if any_links else "9b. Shear Links -- Nominal (EC2 Cl.9.2.2)",
                    "rows": link_rows})
 
-    report.append({"section": "10. Deflection (EC2 Cl.7.4.2, two-stage)", "rows": [
-        R2("Governing span", f"{gov_span_label} ({'end' if is_end_span else 'interior'} span) -- highest sagging demand", f"K = {K_sys:.2f}"),
+    defl_rows = [
+        R2("Method", "every span checked with its own K (EC2 Table 7.4N: 1.0 single span, 1.3 end span, 1.5 interior span) and its own A_s,req; the governing span has the highest actual/allowable", f"{len(defl_spans)} span(s)"),
+    ]
+    for x in defl_spans:
+        defl_rows.append(R2(x["span"], f"L/d actual = {x['L_m'] * 1000:.0f}/{d_mm:.1f} = {x['actual']:.2f} ; allowable = {x['allowable']:.2f} (K = {x['K']:.1f}{', F1 = 0.8' if x['F1'] < 1 else ''}{', F3 = %.3f' % x['F3'] if x['F3'] != 1 else ''}{', capped at 40K' if x['capped'] else ''})",
+                            f"{x['ratio']:.2f} {'PASS' if x['ok'] else 'FAIL'}"))
+    defl_rows += [
+        R2("Governing span", f"{gov_span_label} ({'single' if n_sp == 1 else 'end' if is_end_span else 'interior'} span) -- highest actual/allowable", f"K = {K_sys:.2f}"),
         R2("Basic span/depth ratio", f"rho = As,req/(bw d) = {As_req_gov:.0f}/({d.bw_mm:.0f} x {d_mm:.1f})", f"rho = {rho:.5f}"),
         R2("Basic span/depth ratio", f"rho0 = sqrt(fck)/1000 = sqrt({d.fck:.0f})/1000", f"rho0 = {rho0:.5f}"),
         R2("Branch", f"rho = {rho:.5f} vs rho0 = {rho0:.5f}", "lightly reinforced (branch A)" if rho <= rho0 else "heavily reinforced (branch B)"),
-        R2("EC2 Cl.7.4.2", "(L/d) = K[11 + 1.5 sqrt(fck)(rho0/rho) + 3.2 sqrt(fck)(rho0/rho-1)^1.5]" if rho <= rho0 else "(L/d) = K[11 + 1.5 sqrt(fck)]", f"(L/d)_basic = {ld_basic:.2f}"),
-        R2("Actual deflection", f"(L/d)_actual = L/d = {gov_span*1000:.0f}/{d_mm:.1f}", f"{actual_Ld:.2f}"),
+        R2("EC2 Cl.7.4.2", "(L/d) = K[11 + 1.5 sqrt(fck)(rho0/rho) + 3.2 sqrt(fck)(rho0/rho-1)^1.5]  (Eq. 7.16a)" if rho <= rho0 else "(L/d) = K[11 + 1.5 sqrt(fck) rho0/rho]  (Eq. 7.16b, rho' = 0)", f"Eq. 7.16 = {ld_eq:.2f}"),
+        R2("EC2 Cl.7.4.2(2)", f"flanged section: b_eff/b_w = {g['beff']:.0f}/{d.bw_mm:.0f} = {g['beff'] / d.bw_mm:.2f} {'> 3, so x 0.8' if F1_defl < 1 else '<= 3, no reduction'}", f"F1 = {F1_defl:.1f}"),
+        R2("Upper limit", f"allowable not taken above 40K = 40 x {K_sys:.1f} (Concrete Centre limit; Eq. 7.16a grows without bound as rho falls)", f"40K = {defl_cap:.1f}"),
+        R2("(L/d) basic", f"min(Eq. 7.16 x F1, 40K) = min({ld_eq:.2f} x {F1_defl:.1f}, {defl_cap:.1f})", f"(L/d)_basic = {ld_basic:.2f}"),
+        R2("Actual", f"(L/d)_actual = L/d = {gov_span*1000:.0f}/{d_mm:.1f}", f"{actual_Ld:.2f}"),
         R2("Base check", f"actual vs basic, before any enhancement -> {actual_Ld:.2f} {'<=' if deflection_base_status=='PASS' else '>'} {ld_basic:.2f}", deflection_base_status),
-        R2("Enhancement factor F3", "base check failed -> F3 = As,prov/As,req (<=1.5)" if deflection_enhanced else "base check already passes -- F3 not required", f"F3 = {F3:.3f}"),
-        R2("Allowable (L/d)", "basic x F3", f"{allowable_Ld:.2f}"),
-        R2("Verdict", f"{actual_Ld:.2f} {'<' if defl_ok else '>'} {allowable_Ld:.2f}", "Deflection is okay" if defl_ok else "Deflection is NOT okay -- increase depth or steel"),
-    ]})
+        R2("Enhancement factor F3", "base check failed -> F3 = As,prov/As,req (<=1.5), result still capped at 40K" if deflection_enhanced else "base check already passes -- F3 not required", f"F3 = {F3:.3f}"),
+        R2("Allowable (L/d)", "min(basic x F3, 40K)", f"{allowable_Ld:.2f}"),
+        R2("Not applied", "F2 = 7/l_eff for spans over 7 m supporting partitions liable to damage (EC2 Cl.7.4.2(2)): the engine is not told whether there are such partitions", "check by hand" if max(spans) > 7 else "no span > 7 m"),
+        R2("Verdict", f"{actual_Ld:.2f} {'<=' if actual_Ld <= allowable_Ld else '>'} {allowable_Ld:.2f} at the governing span; all spans {'pass' if defl_ok else 'do not pass'}", "Deflection is okay" if defl_ok else "Deflection is NOT okay -- increase depth or steel"),
+    ]
+    report.append({"section": "10. Deflection (EC2 Cl.7.4.2, two-stage)", "rows": defl_rows})
 
     report.append({"section": "11. Checks and Notes", "rows": [
         R2("Flexure -- spans", "all spans", "PASS" if checks["flexure_spans"] else "FAIL"),
@@ -572,7 +607,12 @@ def design_continuous_beam(d: ContinuousBeamInput) -> dict:
                        "allowable_Ld": round(allowable_Ld, 2), "K_sys": K_sys, "F3": round(F3, 3),
                        "base_status": deflection_base_status, "enhanced": deflection_enhanced,
                        "status": "OK" if defl_ok else "NOT OK",
-                       "ld_basic": round(ld_basic, 2), "rho": round(rho, 5), "rho0": round(rho0, 5)},
+                       "ld_basic": round(ld_basic, 2), "rho": round(rho, 5), "rho0": round(rho0, 5),
+                       "ld_eq": round(ld_eq, 2), "F1": F1_defl, "cap_40K": round(defl_cap, 1),
+                       "spans": [{"span": x["span"], "K": x["K"], "actual_Ld": round(x["actual"], 2),
+                                  "allowable_Ld": round(x["allowable"], 2), "F1": x["F1"], "F3": round(x["F3"], 3),
+                                  "capped": x["capped"], "status": "OK" if x["ok"] else "NOT OK"}
+                                 for x in defl_spans]},
         "checks": checks,
         "report": report,
     }

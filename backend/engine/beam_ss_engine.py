@@ -215,7 +215,9 @@ def design_ss_beam(d: BeamInput) -> dict:
     if rho and rho <= rho0:
         ld_basic = K_sys * (11 + 1.5 * math.sqrt(d.fck) * (rho0 / rho) + 3.2 * math.sqrt(d.fck) * max((rho0 / rho) - 1, 0.0) ** 1.5)
     else:
-        ld_basic = K_sys * (11 + 1.5 * math.sqrt(d.fck))
+        # Eq. 7.16b with no compression steel (rho' = 0): K[11 + 1.5 sqrt(fck) rho0/rho].
+        # Was K(11 + 1.5 sqrt(fck)), dropping rho0/rho (< 1 here): unconservative.
+        ld_basic = K_sys * (11 + 1.5 * math.sqrt(d.fck) * ((rho0 / rho) if rho else 1.0))
     actual_Ld = (L * 1000) / d_eff
     base_status = "PASS" if actual_Ld <= ld_basic else "FAIL"
     if base_status == "PASS":
@@ -340,7 +342,7 @@ def design_ss_beam(d: BeamInput) -> dict:
         R2("Basic span/depth ratio", f"rho = As,req/(bw d) = {As_req:.1f}/({d.bw_mm:.0f} x {d_eff:.1f})", f"rho = {rho:.5f}"),
         R2("Basic span/depth ratio", f"rho0 = sqrt(fck)/1000 = sqrt({d.fck:.0f})/1000", f"rho0 = {rho0:.5f}"),
         R2("Branch", f"rho = {rho:.5f} vs rho0 = {rho0:.5f}", "lightly reinforced (branch A)" if rho <= rho0 else "heavily reinforced (branch B)"),
-        R2("EC2 Cl.7.4.2", "(L/d) = K[11 + 1.5 sqrt(fck)(rho0/rho) + 3.2 sqrt(fck)(rho0/rho - 1)^1.5]" if rho <= rho0 else "(L/d) = K[11 + 1.5 sqrt(fck)]", f"(L/d)_basic = {ld_basic:.2f}"),
+        R2("EC2 Cl.7.4.2", "(L/d) = K[11 + 1.5 sqrt(fck)(rho0/rho) + 3.2 sqrt(fck)(rho0/rho - 1)^1.5]" if rho <= rho0 else "(L/d) = K[11 + 1.5 sqrt(fck) rho0/rho]  (Eq. 7.16b, rho' = 0)", f"(L/d)_basic = {ld_basic:.2f}"),
         R2("Actual deflection", f"(L/d)_actual = L/d = {L*1000:.0f}/{d_eff:.1f}", f"{actual_Ld:.2f}"),
         R2("Base check", f"actual vs basic, before any enhancement -> {actual_Ld:.2f} {'<=' if base_status=='PASS' else '>'} {ld_basic:.2f}", base_status),
         R2("Enhancement factor F3", f"base check failed -> F3 = As,prov/As,req = {As_prov:.1f}/{As_req:.1f}  (<=1.5)" if deflection_enhanced else "base check already passes -- F3 not required", f"F3 = {F3:.3f}"),

@@ -1,7 +1,8 @@
 # backend/models/continuous_beam_schemas.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import List, Optional, Dict
 from models.schemas import DesignCode
+from models.beam_schemas import BeamDesignBasis
 
 
 class CBGeometry(BaseModel):
@@ -57,6 +58,19 @@ class ContinuousBeamRequest(BaseModel):
     bar_diameters: Optional[List[int]] = Field([16, 20, 25, 32])
     link_diameter: int = 8
     region: str = "Nigeria"
+    design_basis: BeamDesignBasis = BeamDesignBasis()
+
+    @model_validator(mode="after")
+    def check_design_code_supported(self):
+        code = self.design_code.value if hasattr(self.design_code, "value") else self.design_code
+        if code != "EC2":
+            raise ValueError(
+                f"Design code '{code}' is not yet available for beams -- only EC2 (EN 1992-1-1) is "
+                f"fully implemented. BS8110 and ACI318 selections currently either crash or silently "
+                f"reuse the EC2 formulas under the wrong label, neither of which is safe to rely on. "
+                f"Please select EC2 for now."
+            )
+        return self
 
 
 # ---------- response ----------

@@ -32,7 +32,6 @@ import MainLayout from './components/layout/MainLayout';
 import ResultsDashboard from './pages/ResultsDashboard';
 import BeamInput from './pages/BeamInput';
 import BeamResults from './pages/BeamResults';
-import ContinuousBeamInput from './pages/ContinuousBeamInput';
 import ContinuousBeamResults from './pages/ContinuousBeamResults';
 import ContinuousSlabInput from './pages/ContinuousSlabInput';
 import ContinuousSlabResults from './pages/ContinuousSlabResults';
@@ -40,8 +39,6 @@ import ColumnInput from './pages/ColumnInput';
 import ColumnResults from './pages/ColumnResults';
 import FoundationInput from './pages/FoundationInput';
 import FoundationResults from './pages/FoundationResults';
-import CombinedFootingInput from './pages/CombinedFootingInput';
-import CombinedFootingResults from './pages/CombinedFootingResults';
 
 function App() {
   return (
@@ -201,13 +198,6 @@ function App() {
                       </ProtectedRoute>
                     } />
 
-                    <Route path="/continuous-beam" element={
-                      <ProtectedRoute>
-                        <MainLayout currentModule="beam" breadcrumb="Beam Design > Continuous Beam > Input">
-                          <ContinuousBeamInput />
-                        </MainLayout>
-                      </ProtectedRoute>
-                    } />
                     <Route path="/continuous-beam-results" element={
                       <ProtectedRoute>
                         <MainLayout currentModule="beam" breadcrumb="Beam Design > Continuous Beam > Results">
@@ -257,20 +247,10 @@ function App() {
                       </MainLayout>
                     </ProtectedRoute>
                   } />
-                  <Route path="/combined-input" element={
-                    <ProtectedRoute>
-                      <MainLayout currentModule="foundation" breadcrumb="Foundation Design > Input">
-                       <CombinedFootingInput />
-                      </MainLayout>
-                    </ProtectedRoute>
-                  } />
-                  <Route path="/combined-results" element={
-                    <ProtectedRoute>
-                      <MainLayout currentModule="foundation" breadcrumb="Foundation Design > Results">
-                        <CombinedFootingResults />
-                      </MainLayout>
-                    </ProtectedRoute>
-                  } />
+                  {/* The combined footing lives in /foundation-input. CombinedFootingInput/Results
+                      (kept, unused) were written against an older 3-column API and always got a 422. */}
+                  <Route path="/combined-input" element={<Navigate to="/foundation-input?type=combined" replace />} />
+                  <Route path="/combined-results" element={<Navigate to="/foundation-input?type=combined" replace />} />
 
                     <Route path="/workspace/:workspaceId/projects/:projectId/results" element={<ResultsDashboard />} />
 

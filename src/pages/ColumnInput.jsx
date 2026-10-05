@@ -10,6 +10,7 @@ import {
   FiHome, FiLoader, FiInfo, FiAlertTriangle, FiCheck,
   FiChevronLeft, FiChevronRight,
 } from "react-icons/fi";
+import DesignProgressBar from "../components/ui/DesignProgressBar";
 import Dropdown from "../components/Dropdown";
 import { columnAPI } from "../services/api";
 
@@ -574,6 +575,7 @@ export default function ColumnInput() {
             <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
           </div>
         )}
+        <DesignProgressBar active={busy} />
 
         {stepName(step) === "Column" && <StepColumn form={form} set={set} directLoad={directLoad} isUniaxial={isUniaxial} />}
         {stepName(step) === "Section" && <StepSection form={form} set={set} layout={layout} directLoad={directLoad} />}

@@ -1,4 +1,10 @@
+# backend/routers/foundation.py
+"""
+Mounted in server.py as:
+    app.include_router(foundation.router, prefix="/api/foundation")
+"""
 from fastapi import APIRouter, HTTPException
+
 from models.foundation_schemas import PadFoundationRequest, CombinedFootingRequest
 from services.foundation_service import calculate_pad_foundation, calculate_combined_footing
 

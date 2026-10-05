@@ -1,6 +1,6 @@
 # backend/models/beam_schemas.py
 from pydantic import BaseModel, Field, model_validator
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Literal
 from enum import Enum
 from models.schemas import DesignCode  # reuse EC2 / BS8110 / ACI318
 
@@ -39,6 +39,25 @@ class BeamLoads(BaseModel):
     live_load: float = Field(0, ge=0, description="kN/m")
     other_live_load: float = Field(0, ge=0, description="kN/m")
 
+class BeamDesignBasis(BaseModel):
+    """
+    Printed on the first page of the Detailed Report. All optional and all
+    free text: who designed, who checked, and whether an independent check
+    is required or done are the designer's own statements -- nothing here is
+    inferred or filled in automatically. Left blank, the report says
+    "not entered" rather than silently omitting the row.
+    """
+    designer_name: Optional[str] = Field(None, max_length=120)
+    designer_qualifications: Optional[str] = Field(None, max_length=160)
+    checked_by: Optional[str] = Field(None, max_length=120)
+    checker_qualifications: Optional[str] = Field(None, max_length=160)
+    stability_responsible: Optional[str] = Field(
+        None, max_length=160,
+        description="Organisation or individual with overall responsibility for "
+                    "the stability of the structure.",
+    )
+    independent_check: Optional[Literal["required", "completed"]] = None
+
 class BeamDesignRequest(BaseModel):
     beam_id: str = "B1"
     design_code: DesignCode = DesignCode.EC2
@@ -50,6 +69,7 @@ class BeamDesignRequest(BaseModel):
     bar_diameters: Optional[List[int]] = Field([16, 20, 25, 32])
     link_diameter: int = 8
     region: str = "Nigeria"
+    design_basis: BeamDesignBasis = BeamDesignBasis()
 
     @model_validator(mode="after")
     def check_design_code_supported(self):

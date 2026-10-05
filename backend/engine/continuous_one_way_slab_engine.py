@@ -52,8 +52,11 @@ applied to the single-span one-way engine):
      - Odd spans loaded (1, 3, 5, ...), even spans unloaded
      - Even spans loaded (2, 4, 6, ...), odd spans unloaded
      - For each interior support: only the two adjacent spans loaded
-   and takes the envelope (max sagging per span, max hogging per support)
-   across all of them. This is the same simplification used in BS 8110
+   "Loaded" = 1.35Gk + 1.5Qk; "unloaded" = 1.35Gk only (EC2 5.1.3(1)P with
+   the recommended gamma_G = 1.35 on every span) -- never zero, since the
+   slab's own weight and finishes are always present. Takes the envelope
+   (max sagging per span, max hogging and max shear per support) across
+   all of them. This is the same simplification used in BS 8110
    §3.5.2.4 / common EC2 practice for continuous beam/slab design.
 """
 from __future__ import annotations
@@ -115,7 +118,7 @@ class SupportResult:
     index: int
     position: str           # "Start" | "Interior k" | "End"
     M_hog_kNm: float        # positive magnitude (hogging)
-    shear_kN: float          # peak design shear at the support face (max adjacent end, all-spans-loaded case)
+    shear_kN: float          # peak design shear at the support face (envelope over all patterns, max adjacent end)
     shear_reduced_kN: float  # shear at distance d from the face: V_face - w*d (EC2 6.2.1(8))
     As_req: float
     As_min: float
@@ -124,6 +127,7 @@ class SupportResult:
     governing_pattern: str = ""
     k: float = 0.0
     z_mm: float = 0.0
+    shear_pattern: str = ""   # pattern giving shear_kN (not necessarily the hogging one)
 
 
 @dataclass
@@ -194,7 +198,8 @@ def _solve_continuous(L_list_mm: List[float], w_list: List[float], EI: float, st
     """Returns per-element [Vi,Mi,Vj,Mj] (N, Nmm) and nodal rotations (rad).
 
     w_list is per-element load (N/mm) -- allows pattern loading by passing
-    0.0 for unloaded spans, distinct from a single uniform w for every span.
+    a different w per span (1.35Gk on unloaded spans), distinct from a single
+    uniform w for every span.
     """
     nn = len(L_list_mm) + 1
     nd = 2 * nn
@@ -240,20 +245,21 @@ def _element_bm(el, x):
     return -el["Mi"] + el["Vi"] * x - el["w"] * x * x / 2.0
 
 
-def _build_load_patterns(n_spans: int, w_full: float) -> List[Dict]:
-    """Standard simplified continuous-beam load cases (BS 8110 sec.4/common EC2
-    practice), not the full 2^n combinatorial set. Each pattern is
-    (label, per-span w list in N/mm)."""
+def _build_load_patterns(n_spans: int, w_full: float, w_perm: float) -> List[Dict]:
+    """Standard simplified continuous-beam load cases (EC2 5.1.3(1)P), not the
+    full 2^n combinatorial set. Each pattern is (label, per-span w list in
+    N/mm). Loaded spans carry w_full = 1.35Gk + 1.5Qk; unloaded spans carry
+    w_perm = 1.35Gk (permanent load is always present)."""
     patterns = [
         {"label": "All spans loaded", "w": [w_full] * n_spans},
     ]
     if n_spans > 1:
-        odd = [w_full if i % 2 == 0 else 0.0 for i in range(n_spans)]
-        even = [w_full if i % 2 == 1 else 0.0 for i in range(n_spans)]
+        odd = [w_full if i % 2 == 0 else w_perm for i in range(n_spans)]
+        even = [w_full if i % 2 == 1 else w_perm for i in range(n_spans)]
         patterns.append({"label": "Alternate spans loaded (1,3,5,...)", "w": odd})
         patterns.append({"label": "Alternate spans loaded (2,4,6,...)", "w": even})
         for k in range(n_spans - 1):
-            w_list = [0.0] * n_spans
+            w_list = [w_perm] * n_spans
             w_list[k] = w_full
             w_list[k + 1] = w_full
             patterns.append({"label": f"Spans {k + 1}-{k + 2} loaded (support {k + 1} hogging)", "w": w_list})
@@ -322,7 +328,7 @@ def design_continuous_slab(inp: ContinuousInput) -> ContinuousResult:
     q_k = inp.live_load + inp.additional_live_load
     w_ed = 1.35 * g_k + 1.5 * q_k          # kN/m^2 == N/mm on 1 m strip
 
-    patterns = _build_load_patterns(n_spans, w_ed)
+    patterns = _build_load_patterns(n_spans, w_ed, 1.35 * g_k)
 
     cover = inp.clear_cover_mm + 5.0   # fixed 5 mm detailing/fixing tolerance -- always, including clear_cover = 0
     bar_dia = inp.bar_diameters[0] if inp.bar_diameters else 12
@@ -342,7 +348,8 @@ def design_continuous_slab(inp: ContinuousInput) -> ContinuousResult:
         span_gov_pattern = [""] * n_spans
         node_gov_hog = [0.0] * (n_spans + 1)
         node_gov_pattern = [""] * (n_spans + 1)
-        node_gov_shear = [0.0] * (n_spans + 1)   # peak |V| at that node, whichever pattern governs hogging there
+        node_gov_shear = [0.0] * (n_spans + 1)   # peak |V| at that node over all patterns
+        node_shear_pattern = [""] * (n_spans + 1)
 
         x_all: List[float] = []; bmd: List[float] = []; sfd: List[float] = []
 
@@ -365,9 +372,14 @@ def design_continuous_slab(inp: ContinuousInput) -> ContinuousResult:
                 if hog > node_gov_hog[n]:
                     node_gov_hog[n] = hog
                     node_gov_pattern[n] = p["label"]
-                    v_left = abs(elems[n - 1]["Vi"] - elems[n - 1]["w"] * elems[n - 1]["L"]) if n > 0 else 0.0
-                    v_right = abs(elems[n]["Vi"]) if n < len(elems) else 0.0
+                # Shear is enveloped on its own. It used to be recorded only
+                # when this pattern set a new hogging max, so a pinned end
+                # (hogging ~0, sign decided by round-off) could report V = 0.
+                v_left = abs(elems[n - 1]["Vi"] - elems[n - 1]["w"] * elems[n - 1]["L"]) if n > 0 else 0.0
+                v_right = abs(elems[n]["Vi"]) if n < len(elems) else 0.0
+                if max(v_left, v_right) > node_gov_shear[n]:
                     node_gov_shear[n] = max(v_left, v_right)
+                    node_shear_pattern[n] = p["label"]
 
             if p["label"] == "All spans loaded":
                 all_loaded_elems = elems
@@ -400,7 +412,8 @@ def design_continuous_slab(inp: ContinuousInput) -> ContinuousResult:
             bar = _choose_bar(As_req, inp.bar_diameters)
             st = "PASS" if (hog_kNm == 0 or (bar and bar.As_prov >= As_req)) else "FAIL"
             supports.append(SupportResult(n, pos, hog_kNm, shear_face_kN, shear_reduced_kN,
-                                           As_req, As_min, bar, st, node_gov_pattern[n], k_sup, z_sup))
+                                           As_req, As_min, bar, st, node_gov_pattern[n], k_sup, z_sup,
+                                           shear_pattern=node_shear_pattern[n]))
 
         gov_dia = max((s.bar.bar_dia for s in spans + supports if s.bar), default=bar_dia)
         if gov_dia == bar_dia:
@@ -440,7 +453,9 @@ def design_continuous_slab(inp: ContinuousInput) -> ContinuousResult:
         if rho and rho <= rho0:
             ld_basic = K_sys * (11 + 1.5 * math.sqrt(fck) * (rho0 / rho) + 3.2 * math.sqrt(fck) * max((rho0 / rho) - 1, 0.0) ** 1.5)
         else:
-            ld_basic = K_sys * (11 + 1.5 * math.sqrt(fck))
+            # Eq. 7.16b with no compression steel (rho' = 0): K[11 + 1.5 sqrt(fck) rho0/rho].
+            # Was K(11 + 1.5 sqrt(fck)), dropping rho0/rho (< 1 here): unconservative.
+            ld_basic = K_sys * (11 + 1.5 * math.sqrt(fck) * ((rho0 / rho) if rho else 1.0))
         # Two-stage check (matches the one-way/two-way engines): F3 is only
         # applied if the slab fails the base (unmodified) ratio.
         deflection_base_status = "PASS" if actual_slenderness <= ld_basic else "FAIL"

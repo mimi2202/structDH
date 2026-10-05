@@ -6,6 +6,7 @@ import {
   FiChevronDown, FiInfo, FiRefreshCw, FiSave,
   FiArrowRight, FiLoader, FiAlertTriangle, FiPlus, FiMinus,
 } from "react-icons/fi";
+import DesignProgressBar from "../components/ui/DesignProgressBar";
 import { beamAPI } from "../services/api";
 
 const RESULTS_SIMPLE = "/beam-results";
@@ -51,11 +52,23 @@ const END_SUPPORTS = [
   { value: "continuous", label: "Continuous End Supports", note: "Outer supports monolithic — hogging developed at ends.", glyph: "fixed_fixed" },
 ];
 
+// EC2 only for now: the backend rejects BS8110 / ACI318 for beams (see the
+// design-code validators in beam_schemas.py / continuous_beam_schemas.py).
+// The isBS branches below are left in place for when BS 8110 is implemented.
 const DESIGN_CODES = [
   { value: "EC2", label: "EN 1992-1-1 (Eurocode 2)" },
-  { value: "BS8110", label: "BS 8110:1997" },
-  { value: "ACI318", label: "ACI 318" },
 ];
+// A draft saved before the EC2-only change can still carry BS8110 (and its
+// M25 / Fe500 grades), which the backend now rejects -- reset it to EC2.
+const ec2Draft = (defaults, saved) => {
+  const d = { ...defaults, ...(saved || {}) };
+  if (d.designCode !== "EC2") {
+    d.designCode = "EC2";
+    d.concreteGrade = defaults.concreteGrade;
+    d.steelGrade = defaults.steelGrade;
+  }
+  return d;
+};
 const ANALYSIS_METHODS = [
   { value: "Linear Elastic", label: "Linear Elastic" },
   { value: "Redistributed", label: "Linear Elastic + Redistribution" },
@@ -84,20 +97,30 @@ const EXPOSURE_CLASSES = [
 ];
 const WORKING_LIVES = [{ value: "50", label: "50 years" }, { value: "100", label: "100 years" }];
 
+// Design basis: free text, all blank by default. independentCheck is
+// "" | "required" | "completed" and is never set for the user.
+const DESIGN_BASIS_DEFAULTS = {
+  designerName: "", designerQualifications: "",
+  checkedBy: "", checkerQualifications: "",
+  stabilityResponsible: "",
+  independentCheck: "",
+};
+
 const DEFAULTS = {
   // ---- simply supported ----
   beamId: "B1",
-  designCode: "BS8110",
+  designCode: "EC2",
   supportCondition: "both_ends_simply_supported",
   topRestraint: "continuous",
   span: "6000", width: "300", depth: "500", effectiveCover: "25",
   leftAdjacentSpacing: "0", rightAdjacentSpacing: "0", slabThickness: "0",
-  concreteGrade: "M25", steelGrade: "Fe500",
+  concreteGrade: "C25/30", steelGrade: "B500",
   unitWeightConcrete: "25", unitWeightSteel: "78.5",
   selfWeightAuto: true,
   wallLoad: "10", finishes: "1.5", additionalDeadLoad: "1.2",
   liveLoad: "3", otherLiveLoad: "2",
   region: "Nigeria",
+  ...DESIGN_BASIS_DEFAULTS,
 };
 
 const CB_DEFAULTS = {
@@ -129,6 +152,7 @@ const CB_DEFAULTS = {
   exposureClass: "XC1",
   crackedSectionSls: true,
   region: "Nigeria",
+  ...DESIGN_BASIS_DEFAULTS,
 };
 
 const MAX_SPANS = 8;
@@ -150,13 +174,13 @@ const BeamInput = () => {
   const [f, setF] = useState(() => {
     try {
       const saved = sessionStorage.getItem(DRAFT_KEY);
-      return saved ? { ...DEFAULTS, ...(JSON.parse(saved).ss || {}) } : DEFAULTS;
+      return saved ? ec2Draft(DEFAULTS, JSON.parse(saved).ss) : DEFAULTS;
     } catch { return DEFAULTS; }
   });
   const [c, setC] = useState(() => {
     try {
       const saved = sessionStorage.getItem(DRAFT_KEY);
-      return saved ? { ...CB_DEFAULTS, ...(JSON.parse(saved).cb || {}) } : CB_DEFAULTS;
+      return saved ? ec2Draft(CB_DEFAULTS, JSON.parse(saved).cb) : CB_DEFAULTS;
     } catch { return CB_DEFAULTS; }
   });
   const [busy, setBusy] = useState(false);
@@ -287,6 +311,14 @@ const BeamInput = () => {
       bar_diameters: barOrder,
       link_diameter: parseInt(c.linkDiameter, 10) || 8,
       region: c.region,
+      design_basis: {
+        designer_name: (c.designerName || "").trim() || null,
+        designer_qualifications: (c.designerQualifications || "").trim() || null,
+        checked_by: (c.checkedBy || "").trim() || null,
+        checker_qualifications: (c.checkerQualifications || "").trim() || null,
+        stability_responsible: (c.stabilityResponsible || "").trim() || null,
+        independent_check: c.independentCheck || null,
+      },
     };
   };
 
@@ -365,6 +397,7 @@ const BeamInput = () => {
             <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
           </div>
         )}
+        <DesignProgressBar active={busy} />
 
         <div className="mb-5">
           <h1 className="text-base font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">
@@ -466,8 +499,11 @@ const BeamInput = () => {
                 </div>
               </Section>
 
-              {/* 5. LOADS */}
-              <Section n="5" title="Loads" info>
+              {/* 5. DESIGN BASIS */}
+              <DesignBasisSection n="5" v={c} onChange={setCb} />
+
+              {/* 6. LOADS */}
+              <Section n="6" title="Loads" info>
                 <div className="overflow-hidden rounded-lg border border-[#e2e8f0] dark:border-[#334155]">
                   <table className="w-full text-left text-sm">
                     <thead>
@@ -537,8 +573,8 @@ const BeamInput = () => {
                 )}
               </Section>
 
-              {/* 6. REINFORCEMENT & DESIGN PARAMS */}
-              <Section n="6" title="Reinforcement &amp; Design Parameters" info>
+              {/* 7. REINFORCEMENT & DESIGN PARAMS */}
+              <Section n="7" title="Reinforcement &amp; Design Parameters" info>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                   <div>
                     <label className={LABEL}>Preferred Main Bar &Oslash; <span className="text-[#94a3b8]">(mm)</span></label>
@@ -668,8 +704,11 @@ const BeamInput = () => {
                 </div>
               </Section>
 
-              {/* 5. LOADS */}
-              <Section n="5" title="Loads">
+              {/* 5. DESIGN BASIS */}
+              <DesignBasisSection n="5" v={f} onChange={set} />
+
+              {/* 6. LOADS */}
+              <Section n="6" title="Loads">
                 <div className="overflow-hidden rounded-lg border border-[#e2e8f0] dark:border-[#334155]">
                   <table className="w-full text-left text-sm">
                     <thead>
@@ -757,6 +796,59 @@ function Section({ n, title, info, children }) {
     </div></div>
   );
 }
+// Same fields, wording and styling as the Design Basis card in ColumnInput.jsx.
+function DesignBasisSection({ n, v, onChange }) {
+  return (
+    <Section n={n} title="Design Basis (optional)">
+      <div className="grid grid-cols-2 gap-4">
+        <div><label className={LABEL}>Designed by</label>
+          <input className={INPUT} value={v.designerName} onChange={(e) => onChange({ designerName: e.target.value })} /></div>
+        <div><label className={LABEL}>Designer's qualifications</label>
+          <input className={INPUT} value={v.designerQualifications} onChange={(e) => onChange({ designerQualifications: e.target.value })} /></div>
+        <div><label className={LABEL}>Checked by</label>
+          <input className={INPUT} value={v.checkedBy} onChange={(e) => onChange({ checkedBy: e.target.value })} /></div>
+        <div><label className={LABEL}>Checker's qualifications</label>
+          <input className={INPUT} value={v.checkerQualifications} onChange={(e) => onChange({ checkerQualifications: e.target.value })} /></div>
+      </div>
+      <div className="mt-4">
+        <label className={LABEL}>Responsible for the stability of the structure</label>
+        <input className={INPUT} value={v.stabilityResponsible} onChange={(e) => onChange({ stabilityResponsible: e.target.value })} />
+      </div>
+      <div className="mt-4">
+        <label className={LABEL}>Independent check</label>
+        <div className="flex flex-wrap gap-2">
+          <Pill on={!v.independentCheck} onClick={() => onChange({ independentCheck: "" })}>Not stated</Pill>
+          <Pill on={v.independentCheck === "required"} onClick={() => onChange({ independentCheck: "required" })}>Required</Pill>
+          <Pill on={v.independentCheck === "completed"} onClick={() => onChange({ independentCheck: "completed" })}>Completed</Pill>
+        </div>
+      </div>
+      <Note>
+        These are printed on the first page of the Detailed Report. Left blank, the report says
+        "not entered". Nothing is filled in for you: who designed, who checked and whether an
+        independent check is required or done are your statements, and building control asks
+        for them with a submission. The independent check is never ticked automatically.
+      </Note>
+    </Section>
+  );
+}
+function Pill({ on, onClick, children }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+        on ? "border-[#0A2F44] bg-[#e6f0f5] text-[#0A2F44] dark:border-[#66a4c2] dark:bg-[#1e3a4a] dark:text-[#66a4c2]"
+           : `border-[#e2e8f0] dark:border-[#334155] ${SUB} hover:border-[#94a3b8]`}`}>
+      {children}
+    </button>
+  );
+}
+function Note({ children }) {
+  return (
+    <div className="mt-3 flex items-start gap-2 rounded-lg border-l-4 border-[#0A2F44] bg-[#e6f0f5] p-3 dark:bg-[#1e3a4a]">
+      <FiInfo className="mt-0.5 flex-shrink-0 text-[#0A2F44] dark:text-[#66a4c2]" size={14} />
+      <p className="text-xs text-[#0A2F44] dark:text-[#cce1eb]">{children}</p>
+    </div>
+  );
+}
 function Field({ label, unit, value, onChange, step }) {
   return <div><label className={LABEL}>{label} {unit ? <span className="text-[#94a3b8]">({unit})</span> : null}</label><input type="number" step={step} value={value} onChange={(e) => onChange(e.target.value)} className={INPUT} /></div>;
 }
@@ -791,7 +883,8 @@ function SelectCard({ selected, onClick, label, sub, glyph }) {
     </button>
   );
 }
-function StepBtn({ onClick, disabled, icon: Icon }) {
+function StepBtn({ onClick, disabled, icon }) {
+  const Icon = icon;
   return (
     <button type="button" onClick={onClick} disabled={disabled}
       className={`flex h-8 w-8 items-center justify-center rounded-lg border border-[#e2e8f0] dark:border-[#334155] ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#334155] disabled:opacity-40 disabled:cursor-not-allowed`}>

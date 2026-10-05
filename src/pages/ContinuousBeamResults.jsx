@@ -140,8 +140,8 @@ export default function ContinuousBeamResults() {
           <Legend items={[["+ve", HOG], ["−ve", SAG]]} />
         </Card>
         <Card n="6" title="Deflection (Serviceability)">
-          <Defl lengths={summary.span_lengths} value={sls.deflection_actual} />
-          <p className={`mt-2 text-center text-[11px] ${SUB}`}>Limit L/250 = {sls.deflection_limit} mm · Calc {sls.deflection_actual} mm</p>
+          <Defl lengths={summary.span_lengths} labels={(data.deflection_detail?.spans || []).map((s) => `L/d ${s.actual_Ld} / ${s.allowable_Ld}`)} />
+          <p className={`mt-2 text-center text-[11px] ${SUB}`}>Span/depth check (EC2 7.4.2), governing span: L/d {sls.deflection_actual} vs allowable {sls.deflection_limit}. Ratios, not deflections in mm.</p>
         </Card>
 
         <Card n="7" title="Design Results (ULS) — Envelope">
@@ -168,7 +168,7 @@ export default function ContinuousBeamResults() {
 
         <Card n="10" title="Serviceability Checks (SLS)">
           <Tbl head={["Check", "Limit", "Calc", "Status"]} rows={[
-            ["Deflection", `${sls.deflection_limit} mm`, `${sls.deflection_actual} mm`, ok(sls.deflection_status === "PASS")],
+            ["Deflection (span/depth L/d)", `\u2264 ${sls.deflection_limit}`, `${sls.deflection_actual}`, ok(sls.deflection_status === "PASS")],
             ["Crack width", `${sls.crack_limit} mm`, `${sls.crack_width} mm`, ok(sls.crack_status === "PASS")],
           ]} />
         </Card>
@@ -183,7 +183,7 @@ export default function ContinuousBeamResults() {
             ["Max Hogging", `${forces.max_hogging} kNm`],
             ["Max Sagging", `${forces.max_sagging} kNm`],
             ["Max Shear", `${forces.max_shear} kN`],
-            ["Max Deflection", `${sls.deflection_actual} mm`],
+            ["Span/depth L/d (actual / allowable)", `${sls.deflection_actual} / ${sls.deflection_limit}`],
             ["Max Utilisation", `${Math.max(capacity.utilization_bending, capacity.utilization_shear)}`],
           ]} status={summary.status} />
         </Card>
@@ -353,7 +353,7 @@ function SFD({ spans, supports }) {
     </svg>
   );
 }
-function Defl({ lengths, value }) {
+function Defl({ lengths, labels = [] }) {
   const { nodes } = geom(lengths);
   const mid = 28;
   return (
@@ -361,7 +361,7 @@ function Defl({ lengths, value }) {
       <line x1={nodes[0]} y1={mid} x2={nodes[nodes.length - 1]} y2={mid} strokeDasharray="3 3" stroke="#94a3b8" strokeWidth="1" />
       {nodes.slice(0, -1).map((x, i) => { const xb = nodes[i + 1], xc = (x + xb) / 2; return <path key={i} d={`M${x},${mid} Q${xc},${mid + 26} ${xb},${mid}`} fill="none" stroke="currentColor" strokeWidth="1.4" />; })}
       {nodes.map((x, i) => <circle key={i} cx={x} cy={mid} r="2" fill="currentColor" />)}
-      {nodes.slice(0, -1).map((x, i) => <text key={`t${i}`} x={(x + nodes[i + 1]) / 2} y={mid + 40} fontSize="7.5" fill="currentColor" textAnchor="middle">−{value}</text>)}
+      {nodes.slice(0, -1).map((x, i) => labels[i] ? <text key={`t${i}`} x={(x + nodes[i + 1]) / 2} y={mid + 40} fontSize="7.5" fill="currentColor" textAnchor="middle">{labels[i]}</text> : null)}
     </svg>
   );
 }
@@ -474,11 +474,11 @@ function ShearTab({ data }) {
         <div className="p-4">
           {shd ? (
             <div className="space-y-1.5">
-              <DRow label="Steel ratio, \u03c1_l = A_s,prov(max)/(b\u00b7d)" value="\u2264 0.02" result={`\u03c1_l = ${shd.rho_l?.toFixed(5)}`} />
-              <DRow label="Size factor, k = 1+\u221a(200/d)" value="\u2264 2.0" result={`k = ${shd.k_factor?.toFixed(3)}`} />
-              <DRow label="C_Rd,c = 0.18/\u03b3_c" value="0.18/1.50" result={`${shd.C_Rdc?.toFixed(3)}`} />
-              <DRow label="v_min = 0.035\u00b7k^1.5\u00b7\u221af_ck" value="" result={`${shd.v_min_mpa?.toFixed(3)} MPa`} />
-              <DRow label="v_Ed = V_Ed(max)/(b\u00b7d)" value="" result={`${shd.v_ed_mpa?.toFixed(3)} MPa`} />
+              <DRow label={"Steel ratio, \u03c1_l = A_s,prov(max)/(b\u00b7d)"} value={"\u2264 0.02"} result={`\u03c1_l = ${shd.rho_l?.toFixed(5)}`} />
+              <DRow label={"Size factor, k = 1+\u221a(200/d)"} value={"\u2264 2.0"} result={`k = ${shd.k_factor?.toFixed(3)}`} />
+              <DRow label={"C_Rd,c = 0.18/\u03b3_c"} value="0.18/1.50" result={`${shd.C_Rdc?.toFixed(3)}`} />
+              <DRow label={"v_min = 0.035\u00b7k^1.5\u00b7\u221af_ck"} value="" result={`${shd.v_min_mpa?.toFixed(3)} MPa`} />
+              <DRow label={"v_Ed = V_Ed(max)/(b\u00b7d)"} value="" result={`${shd.v_ed_mpa?.toFixed(3)} MPa`} />
               <DRow label="v_Rd,c = max(main term, v_min)" value="" result={`${shd.v_rdc_mpa?.toFixed(3)} MPa`} ok={shd.v_ed_mpa <= shd.v_rdc_mpa} />
               <div className="mt-2 flex items-center justify-between rounded-md bg-[#f8fafc] dark:bg-[#0b0f19] px-3 py-2">
                 <span className={`text-xs font-semibold ${SUB}`}>V_Ed(max) / V_Rd,c</span>
@@ -513,15 +513,18 @@ function DeflectionTab({ data }) {
         <div className="p-4">
           {dd ? (
             <div className="space-y-1.5">
-              <DRow label="Governing span" value="highest sagging demand" result={dd.governing_span} />
+              <DRow label="Governing span" value="every span checked; highest actual/allowable governs" result={dd.governing_span} />
               <DRow label="Structural system factor, K" value="EC2 Table 7.4N (end vs interior span)" result={`K = ${dd.K_sys?.toFixed(2)}`} />
-              <DRow label="\u03c1 = A_s,req/(b\u00b7d)" value="" result={`\u03c1 = ${dd.rho?.toFixed(5)}`} />
-              <DRow label="\u03c1\u2080 = \u221af_ck/1000" value="" result={`\u03c1\u2080 = ${dd.rho0?.toFixed(5)}`} />
+              <DRow label={"\u03c1 = A_s,req/(b\u00b7d)"} value="" result={`\u03c1 = ${dd.rho?.toFixed(5)}`} />
+              <DRow label={"\u03c1\u2080 = \u221af_ck/1000"} value="" result={`\u03c1\u2080 = ${dd.rho0?.toFixed(5)}`} />
               <DRow label="Branch" value={dd.rho <= dd.rho0 ? "\u03c1 \u2264 \u03c1\u2080" : "\u03c1 > \u03c1\u2080"} result={dd.rho <= dd.rho0 ? "lightly reinforced (A)" : "heavily reinforced (B)"} />
-              <DRow label="(L/d)_basic" value="EC2 \u00a77.4.2 formula" result={dd.ld_basic?.toFixed(2)} />
+              {dd.ld_eq != null && <DRow label="EC2 Eq. 7.16" value={"K[11 + 1.5\u221af_ck(\u03c1\u2080/\u03c1) + \u2026]"} result={dd.ld_eq.toFixed(2)} />}
+              {dd.F1 != null && <DRow label="Flanged section, F1" value={"EC2 \u00a77.4.2(2): \u00d70.8 where b_eff/b_w > 3"} result={`F1 = ${dd.F1.toFixed(1)}`} />}
+              {dd.cap_40K != null && <DRow label="Upper limit 40K" value="Concrete Centre limit on allowable L/d" result={dd.cap_40K.toFixed(1)} />}
+              <DRow label="(L/d)_basic" value={"min(Eq. 7.16 \u00d7 F1, 40K)"} result={dd.ld_basic?.toFixed(2)} />
               <DRow label="Base check (actual vs basic, before enhancement)" value="" result={dd.base_status} ok={dd.base_status === "PASS"} />
               <DRow label="Enhancement factor, F3" value={dd.enhanced ? "base check failed \u2192 F3 = As,prov/As,req (\u22641.5)" : "base check already passes \u2014 not required"} result={`F3 = ${dd.F3?.toFixed(3)}`} />
-              <DRow label="Allowable (L/d) = basic \u00d7 F3" value="" result={sls.deflection_limit} />
+              <DRow label={"Allowable (L/d) = min(basic \u00d7 F3, 40K)"} value="" result={sls.deflection_limit} />
               <div className={`mt-2 flex items-center justify-between rounded-md px-3 py-2 ${sls.deflection_status === "PASS" ? "bg-green-50 dark:bg-green-900/20" : "bg-red-50 dark:bg-red-900/20"}`}>
                 <span className={`text-xs font-semibold ${SUB}`}>Actual L/d vs Allowable</span>
                 <span className={`text-sm font-bold ${sls.deflection_status === "PASS" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>

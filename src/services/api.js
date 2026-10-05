@@ -85,7 +85,15 @@ export const slabAPI = {
       })(),
       use_ai: false,
       region: "Nigeria",
-      building_use: formData.buildingUse || "office"
+      building_use: formData.buildingUse || "office",
+      design_basis: {
+        designer_name: (formData.designerName || "").trim() || null,
+        designer_qualifications: (formData.designerQualifications || "").trim() || null,
+        checked_by: (formData.checkedBy || "").trim() || null,
+        checker_qualifications: (formData.checkerQualifications || "").trim() || null,
+        stability_responsible: (formData.stabilityResponsible || "").trim() || null,
+        independent_check: formData.independentCheck || null,
+      }
     };
 
     const response = await fetch(`${API_BASE}${ENDPOINTS.slab}`, {
@@ -169,6 +177,14 @@ export const beamAPI = {
       bar_diameters: formData.barDiameters || [16, 20, 25, 32],
       link_diameter: parseInt(formData.linkDiameter) || 8,
       region: formData.region || "Nigeria",
+      design_basis: {
+        designer_name: (formData.designerName || "").trim() || null,
+        designer_qualifications: (formData.designerQualifications || "").trim() || null,
+        checked_by: (formData.checkedBy || "").trim() || null,
+        checker_qualifications: (formData.checkerQualifications || "").trim() || null,
+        stability_responsible: (formData.stabilityResponsible || "").trim() || null,
+        independent_check: formData.independentCheck || null,
+      }
     };
 
     const res = await fetch(`${API_BASE}${ENDPOINTS.beam}`, {
@@ -251,6 +267,14 @@ export const continuousBeamAPI = {
       bar_diameters: form.barDiameters || [16, 20, 25, 32],
       link_diameter: parseInt(form.linkDiameter) || 8,
       region: form.region || "Nigeria",
+      design_basis: {
+        designer_name: (form.designerName || "").trim() || null,
+        designer_qualifications: (form.designerQualifications || "").trim() || null,
+        checked_by: (form.checkedBy || "").trim() || null,
+        checker_qualifications: (form.checkerQualifications || "").trim() || null,
+        stability_responsible: (form.stabilityResponsible || "").trim() || null,
+        independent_check: form.independentCheck || null,
+      },
     };
     return beamAPI.startContinuousDesign(request);
   },
@@ -281,15 +305,25 @@ export const continuousSlabAPI = {
         design_code: form.designCode || "EC2",
         analysis_method: form.analysisMethod || "limit_state",
         exposure_class: form.exposureClass || "XC3",
-        fire_rating: parseInt(form.fireRating) || 60,
+        // 0 min is a real choice ("no fire check"), so don't let || turn it into 60
+        fire_rating: Number.isNaN(parseInt(form.fireRating)) ? 60 : parseInt(form.fireRating),
         crack_width_limit: parseFloat(form.crackWidthLimit) || 0.3,
         deflection_limit: parseInt(form.deflectionLimit) || 250,
       },
       bar_diameters: form.barDiameters || [10, 12, 16],
       cover_tolerance: parseFloat(form.coverTolerance) || 5,
-      occupancy: form.occupancy || "office",
+      // "Custom" ("") means occupancy not stated -> backend assumes psi_2 = 0.6
+      occupancy: form.occupancy || null,
       main_bar_dia: parseInt(form.mainBarDia) || 12,
       region: form.region || "Nigeria",
+      design_basis: {
+        designer_name: (form.designerName || "").trim() || null,
+        designer_qualifications: (form.designerQualifications || "").trim() || null,
+        checked_by: (form.checkedBy || "").trim() || null,
+        checker_qualifications: (form.checkerQualifications || "").trim() || null,
+        stability_responsible: (form.stabilityResponsible || "").trim() || null,
+        independent_check: form.independentCheck || null,
+      }
     };
 
     const res = await fetch(`${API_BASE}${ENDPOINTS.continuousSlab}`, {
