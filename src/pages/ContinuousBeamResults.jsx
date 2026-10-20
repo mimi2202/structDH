@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { exportElementToPdf } from "../utils/exportPdf";
+import { buildCoverHtml } from "../utils/reportCover";
 import { useDesignMeta } from "../contexts/DesignMetaContext";
 import DetailedReport from "../components/DetailedReport";
 import {
@@ -16,6 +17,14 @@ const HOG = "#ef4444";   // negative / hogging
 const SAG = "#22c55e";   // positive / sagging
 
 const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection"];
+
+// what each tab holds, for the cover page of its PDF
+const TAB_NOTES = {
+  "Overview": "geometry, loads, moment and shear diagrams, reinforcement and the status of every check.",
+  "Flexural Design": "the bending design in full: K, lever arm, tension and minimum steel, bars provided (EC2 6.1).",
+  "Shear Design": "the shear design in full: resistance without links, links where needed (EC2 6.2).",
+  "Deflection": "the span/depth deflection check for every span (EC2 7.4.2).",
+};
 
 export default function ContinuousBeamResults() {
   const navigate = useNavigate();
@@ -71,7 +80,7 @@ export default function ContinuousBeamResults() {
   return (
     <div ref={sheetRef} className="flex flex-col">
       {/* title */}
-      <div className="cb-no-print mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className={`text-lg font-bold uppercase tracking-wide ${ACCENT}`}>Continuous Beam Output — {summary.design_code}</h1>
           <p className={`text-sm ${SUB}`}>{summary.beam_id} · Design Code: {summary.design_code}</p>
@@ -81,12 +90,22 @@ export default function ContinuousBeamResults() {
             {pass ? <FiCheckCircle /> : <FiXCircle />} {pass ? "SAFE" : "CHECK"}
           </span>
           <button onClick={() => setReportOpen(true)} className="flex items-center gap-2 rounded-lg border border-[#0A2F44] dark:border-[#66a4c2] px-3 py-1.5 text-sm font-medium text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#e6f0f5] dark:hover:bg-[#1e3a4a]"><FiFileText size={15} /> Detailed Report</button>
-          <button onClick={() => exportElementToPdf(sheetRef.current, `ContinuousBeam-${summary.beam_id || "report"}`)} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#082636]"><FiDownload size={15} /> Download</button>
+          <button onClick={() => exportElementToPdf(sheetRef.current, `ContinuousBeam-${summary.beam_id || "report"}-${tab}`, buildCoverHtml({
+            element: "Continuous Beam", member: summary.beam_id, section: tab, sectionNote: TAB_NOTES[tab],
+            description: `${summary.n_spans}-span continuous reinforced concrete beam designed to BS EN 1992-1-1 for bending, shear and deflection.`,
+            facts: [
+              ["Spans", summary.span_lengths.join(" + ") + " mm"],
+              ["Section (b × h)", `${summary.width} × ${summary.depth} mm, d = ${summary.effective_depth} mm`],
+              ["Materials", `${summary.concrete_grade}, ${summary.steel_grade}`],
+              ["Utilisation (bending / shear)", `${capacity.utilization_bending} / ${capacity.utilization_shear}`],
+            ],
+            status: summary.status, report,
+          }))} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#082636]"><FiDownload size={15} /> Download</button>
         </div>
       </div>
 
       {/* meta strip */}
-      <div className={`cb-no-print mb-5 ${CARD} flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3`}>
+      <div className={`mb-5 ${CARD} flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3`}>
         {meta.map((m, i) => (
           <div key={i} className="flex items-center gap-2">
             <m.icon className={`${ACCENT}`} size={16} />
@@ -289,7 +308,7 @@ function support(x, y, kind) {
   if (kind === "pin") return <path d={`M${x},${y} l-6,9 h12 z`} fill="currentColor" fillOpacity="0.35" stroke="currentColor" strokeWidth="1.2" />;
   return <g stroke="currentColor"><path d={`M${x},${y} l-6,9 h12 z`} fill="currentColor" fillOpacity="0.35" strokeWidth="1.2" /><line x1={x - 8} y1={y + 12} x2={x + 8} y2={y + 12} strokeWidth="1.2" /></g>;
 }
-function Elevation({ lengths, nSup }) {
+function Elevation({ lengths }) {
   const { nodes } = geom(lengths);
   return (
     <svg viewBox="0 0 360 90" className="w-full text-[#475569] dark:text-[#94a3b8]">
@@ -403,7 +422,7 @@ function DRow({ label, value, result, ok }) {
 }
 
 function FlexuralTab({ data }) {
-  const { summary, spans, supports, capacity, forces } = data;
+  const { spans, supports, capacity, forces } = data;
   const rows = [
     ...spans.map((s) => ({ label: `Span ${s.index}`, sd: s.bottom_steel, M: s.m_sagging })),
     ...supports.filter((sp) => sp.m_hogging > 0).map((sp) => ({ label: sp.label + ` (S${sp.index})`, sd: sp.top_steel, M: sp.m_hogging })),
@@ -466,7 +485,7 @@ function FlexuralTab({ data }) {
 }
 
 function ShearTab({ data }) {
-  const { spans, supports, forces, capacity, shear_detail: shd } = data;
+  const { spans, supports, forces, shear_detail: shd } = data;
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
       <section className={CARD}>

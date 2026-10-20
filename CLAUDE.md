@@ -79,9 +79,37 @@ FastAPI backend (`backend/`, run with `python -m uvicorn server:app --port <port
 - Verified: 5 cases via real requests, all outputs match an independent hand calc (numerical integration of the soil reaction, own punching search); UI paths in headless Chrome all reach results; pad cases unchanged. 5.6x2.0 h500 900+1200 now FAILS shear (554 > 407 kN; was 251 PASS).
 - Not done: no option to add top steel to pass shear (engine picks minimal steel, e.g. case h700 fails by 0.4% with T20@200 top); transverse moment uses qmax over the full length.
 
-### Pad footing, still NOT fixed (await user)
-- Punching: relief area (cx+4d)(cy+4d) at qmax; V_Ed clamps to 0 when the 2d perimeter is outside the footing; EC2 6.4.4 search gives 1.10 on a 3.5 m pad the engine passes. Same fix as the combined engine would apply.
-- fctm 2.6/2.9 (As,min 17% low at C40); bearing on ULS loads with no self-weight; rho_l = 0.002 fixed.
+### Done 2026-10-20: pad footing shear and punching (`pad_foundation_engine.py`)
+- One-way shear: rho_l = As,prov/(b d) per direction (was 0.002); fctm EC2 Table 3.1 (imported `_fctm` from the combined engine).
+- Punching: EC2 6.4.4(2) search a <= 2d and a <= smaller projection, relief at ULS q0 = N/A, vRd = vRd,c 2d/a, beta Eq. 6.51 both directions, d = (dx+dy)/2, rho = sqrt(rho_x rho_y); no perimeter fits -> "not applicable"; vRd,max at u0. punching_pct = max(ratio, face ratio). PunchingOut gets applicable/a_mm/u_m/beta/VEd_red_kN/vRd_MPa/v0_MPa/vRdmax_MPa; report section 11 rewritten; results page shows a, vRd and the face check.
+- Verified: 6 cases via bundled api.js vs independent script (scratchpad handcalc_pad.py), all shear and punching values match. User's 1500 h400 230x450 1250 kN: punching was 0%, now 82.8%; shear X 117% (real; 2300 h500 passes at 84.5%).
+- Still: shear VEd uses qmax over the whole projection (conservative); engine never adds steel to pass shear.
+
+### Done 2026-10-20: pad footing bearing on SLS, input draft, shape check, DA help
+- `pad_foundation_engine.py`: bearing/uplift on service loads + footing self-weight (25 kN/m3), as in the combined engine; no service axial -> ULS used. Structural design unchanged (ULS net pressure). Request gets `service_axial_kN`, `service_moment_x/y_kNm`; response `soil_pressure` is now SLS, plus `soil_pressure_uls`, `sls_from_uls`, `footing_weight_kN`, `sls_total_load_kN`. Report section 5 rewritten. The old ULS-vs-allowable check failed even the page defaults (204 > 200).
+- FoundationInput: sends the Service row; sessionStorage draft (`foundationInputDraft`, Reset clears); Square/Rectangular warning, auto-corrected on design; explanation box for each EN 1997-1 design approach (DA is display-only).
+- Verified: 4 pad cases via bundled api.js match hand calc (e.g. 2.2 m pad SLS 900 -> qmax 200.20, 2.3 m -> 184.16); UI in headless Chrome.
+
+### Done 2026-10-20: pad column shape, offset, fixity
+- Circular (`column_shape`, column_x_mm = D): punching u = pi(D+2a), beta = 1 + 0.6 pi (|ex|+|ey|)/(D+2a) (Eq. 6.53 at 2d); bending/one-way shear at the equal-area square face 0.886D.
+- `column_offset_x/y_mm` (replaces the display-only Eccentricity): footing moments Mx = Mx,col + N oy, My = My,col + N ox (ULS and SLS, W_f at centre); larger overhang designed; punching relief = ULS pressure under the column centre, perimeter limited by the shorter overhang. Location Edge/Corner on the page sets the offset so the column is flush (then punching "not applicable": truncated perimeters of Fig. 6.15 NOT modelled). Validator rejects offsets that put the column outside.
+- `column_fixity` "pinned" drops the column moments (bearing, design, beta).
+- Combined mode hides Column Shape (combined engine is rectangular only).
+- Verified: 6 cases via bundled api.js vs independent script (scratchpad handcalc_pad2.py), all match; UI in headless Chrome.
+
+### Done 2026-10-20: results tabs + cover page on every element's PDF
+- `src/utils/reportCover.js` `buildCoverHtml()`: cover page (element, member, project, which tab, what it holds, key facts, PASS/FAIL, designer / checker / stability / independent check read from the report rows -- both row shapes -- "Not entered" when blank, calc ID + date). `exportElementToPdf(el, name, cover)` prepends it (print CSS `.pdf-cover`, page break after).
+- `src/components/ReportSections.jsx`: report sections filtered by title regex, shown inside a tab (dr-row/dr-section print classes).
+- New tabs: ContinuousSlabResults (Overview / Flexural Design / Shear Design / Deflection & Durability; Download used window.print() of the whole page), FoundationResults pad + combined (Overview / Bearing / Flexural Design / Shear & Punching). Each in-depth tab = its panels + the matching report trace.
+- Cover wired on beam, continuous beam, slab (dead "Export Excel" button -> Download Report), continuous slab, column, pad, combined. Download prints the active tab only.
+- BeamResults: 34 JSX attributes + the BMD label printed literal "·" etc.; now `={"..."}`. Same for one placeholder in ColumnInput.
+- Verified in headless Chrome: all 7 element pages x every tab -> cover present, right section, designer name from the input ("Not entered" when blank); PDF render: page 1 cover, page 2+ the tab.
+- Slab results buttons wired (were dead): Save / Save Results -> `utils/savedDesigns.js` (localStorage `saved_designs_slab`, newest first, max 20, drops oldest on quota); Open -> modal list with open/delete (opening replaces location.state); Export Results -> `utils/exportCsv.js` CSV with BOM (summary, forces, reinforcement flattened, checks, warnings, calc trace); the dead "more" button is a menu of these. Verified in headless Chrome.
+- Lint now clean on every file touched today (unused vars; TopBtn/OutlineBtn `const Icon = icon`; ColumnInput's step-clamp effect removed -- STEPS_AXIAL === STEPS_FULL so it could never fire; FoundationResults `allow` now draws the allowable-bearing plane on the 3D plot).
+
+- PDF charts: `exportElementToPdf` is now async; `snapshotCharts()` replaces each Plotly chart in the print copy with a PNG from `Plotly.toImage` (Plotly loaded by dynamic import only when the page has one) and copies plain 2D canvases via toDataURL -- the innerHTML copy left WebGL canvases blank, so the footing 3D soil-pressure plot was missing from every PDF. Print sheet is hidden on screen while charts are captured. Plot camera pulled back (z-axis labels were clipped) and colorbar title fixed (Plotly 3 needs title.text). Verified: pad + combined Bearing-tab PDFs contain the chart image.
+
+- PDF SVG diagrams: the print rule `#__print_sheet * { height: auto !important }` also hit SVG `<rect>` (height is a CSS geometry property in Chrome) and collapsed every rectangle: beam elevation/section, slab plan, column section, cont. beam sections all printed blank. Rule now `*:not(svg):not(svg *)`. Checked print renders of beam, cont. beam, slab, cont. slab, column (overview + interaction): no collapsed shapes. Also fixed the last literal unicode escapes in JSX text (BeamResults M_Ed/M_Rd "kN·m" x2, ColumnInput crank-note dash; scan script in scratchpad find_jsx_text_escapes.py) and the slab cover title "Two-Way Slab Slab".
+- Utilisation bars print: they were never in the PDF (the height:auto print rule made the empty bar divs 0 tall, and backgrounds were forced transparent). Bar track + fill now carry `pdf-keep-color` (track also `pdf-bar-track`): exempt from the height and background rules, `print-color-adjust: exact` so they print with Chrome's "Background graphics" off, track forced #e2e8f0 so dark mode prints a pale track. Bars: slab `Gauge` (StructuralResults), column `UtilBar` (ColumnResults; biaxial, axial, moment). Verified by real PDFs (printBackground false, light + dark theme) rendered with PyMuPDF. New bars elsewhere need the same two classes.
 
 ### Known, not fixed
-- Pre-existing lint error: `allow` unused in `SoilPressure3D` (FoundationResults.jsx:175), also in HEAD.

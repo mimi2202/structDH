@@ -8,6 +8,7 @@ import React, { useState, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { exportElementToPdf } from "../utils/exportPdf";
+import { buildCoverHtml } from "../utils/reportCover";
 import {
   FiArrowLeft, FiCheckCircle, FiXCircle, FiFileText, FiX,
   FiAlertTriangle, FiDownload, FiInfo,
@@ -29,6 +30,14 @@ const n2 = (v) => (v === null || v === undefined || Number.isNaN(v) ? "—" : Nu
 const n3 = (v) => (v === null || v === undefined || Number.isNaN(v) ? "—" : Number(v).toFixed(3));
 const UTIL_CAP = 999;
 const utilText = (u) => (u >= UTIL_CAP ? "no capacity" : n3(u));
+
+// tab key -> [label, what it holds], for the cover page of its PDF
+const TAB_COVER = {
+  overview: ["Overview", "section, reinforcement, governing level and the status of every check."],
+  interaction: ["Interaction", "the N-M interaction diagram for the section with the design actions plotted."],
+  levels: ["Per level", "axial load, moments, slenderness and utilisation at every storey."],
+  checks: ["Checks", "each code check in full for the selected storey (EC2 5.8, 6.1, 9.5)."],
+};
 
 export default function ColumnResults() {
   const navigate = useNavigate();
@@ -85,7 +94,18 @@ export default function ColumnResults() {
               className="flex items-center gap-2 rounded-lg border border-[#e2e8f0] px-4 py-2 text-sm text-[#0A2F44] hover:bg-[#f1f5f9] dark:border-[#334155] dark:text-[#66a4c2] dark:hover:bg-[#334155]">
               <FiFileText size={15} /> Detailed Report
             </button>
-            <button onClick={() => exportElementToPdf(sheetRef.current, `Column-${s.column_id}`)}
+            <button onClick={() => exportElementToPdf(sheetRef.current, `Column-${s.column_id}-${TAB_COVER[tab][0]}`, buildCoverHtml({
+                element: `${s.column_type ? s.column_type[0].toUpperCase() + s.column_type.slice(1) + " " : ""}Column`,
+                member: s.column_id, section: TAB_COVER[tab][0], sectionNote: TAB_COVER[tab][1],
+                description: `Reinforced concrete column (${s.braced ? "braced" : "unbraced"}, ${s.end_condition || "end conditions as entered"}) designed to BS EN 1992-1-1, including slenderness and second-order effects.`,
+                facts: [
+                  ["Section", `${s.b_mm} × ${s.h_mm} mm`],
+                  ["Materials", [s.concrete_grade, s.steel_grade].filter(Boolean).join(", ")],
+                  ["Storey height", s.storey_height_m != null ? `${s.storey_height_m} m` : ""],
+                  ["Governing level", s.critical_level],
+                ],
+                status: s.status, report: r.report,
+              }))}
               className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
               <FiDownload size={15} /> Download PDF
             </button>
@@ -422,7 +442,7 @@ function NMChart({ points, NEd, MEd, MRd }) {
 }
 
 /* ---------------- PER LEVEL ---------------- */
-function LevelsTab({ r, isBiaxial }) {
+function LevelsTab({ r }) {
   const levels = r.levels || [];
   const slenderAny = levels.some((l) => l.x?.slender || l.y?.slender);
   return (
@@ -841,8 +861,8 @@ function UtilBar({ label, value, detail }) {
         <span className={`font-mono text-xs ${MAIN}`}>{detail}</span>
       </div>
       <div className="mt-1 flex items-center gap-2">
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#e2e8f0] dark:bg-[#334155]">
-          <div className={`h-1.5 rounded-full ${ok ? "bg-green-500" : "bg-red-500"}`}
+        <div className="pdf-keep-color pdf-bar-track h-1.5 flex-1 overflow-hidden rounded-full bg-[#e2e8f0] dark:bg-[#334155]">
+          <div className={`pdf-keep-color h-1.5 rounded-full ${ok ? "bg-green-500" : "bg-red-500"}`}
             style={{ width: `${Math.min(v * 100, 100)}%` }} />
         </div>
         <span className={`text-[11px] font-semibold ${ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>

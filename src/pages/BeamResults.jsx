@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FiArrowLeft, FiFileText, FiDownload, FiChevronRight } from "react-icons/fi";
 import { exportElementToPdf } from "../utils/exportPdf";
+import { buildCoverHtml } from "../utils/reportCover";
 import BeamReportModal from "../components/beam/BeamReportModal";
 import { useDesignMeta } from "../contexts/DesignMetaContext";
 
@@ -19,6 +20,14 @@ const f = (v, d = 2) => (Number.isFinite(v) ? Number(v).toFixed(d) : "\u2014");
 const isPass = (s) => s === "PASS" || s === "OK";
 
 const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection"];
+
+// what each tab holds, for the cover page of its PDF
+const TAB_NOTES = {
+  "Overview": "geometry, loads, moment and shear diagrams, reinforcement and the status of every check.",
+  "Flexural Design": "the bending design in full: K, lever arm, tension and minimum steel, bars provided (EC2 6.1).",
+  "Shear Design": "the shear design in full: resistance without links, links where needed (EC2 6.2).",
+  "Deflection": "the span/depth deflection check in full (EC2 7.4.2).",
+};
 
 export default function BeamResults() {
   const location = useLocation();
@@ -60,6 +69,19 @@ export default function BeamResults() {
   const codeShort = (summary.design_code || "").includes("1992") || (summary.design_code || "").includes("EC2") ? "EC2" : summary.design_code;
   const bw = summary.width;
   const d_eff = summary.effective_depth;
+  // prints the tab on screen behind a cover page
+  const downloadPdf = () => exportElementToPdf(sheetRef.current, `Beam-${summary.beam_id || "report"}-${tab}`, buildCoverHtml({
+    element: "Simply Supported Beam", member: summary.beam_id, section: tab, sectionNote: TAB_NOTES[tab],
+    description: `${summary.support_condition || "Simply supported"} reinforced concrete beam designed to BS EN 1992-1-1 for bending, shear and deflection.`,
+    facts: [
+      ["Span", `${summary.span} mm`],
+      ["Section (b × h)", `${summary.width} × ${summary.depth} mm, d = ${summary.effective_depth} mm`],
+      ["Materials", `${summary.concrete_grade}, ${summary.steel_grade}`],
+      ["Bending M_Ed / M_Rd", `${f(forces.max_moment)} / ${f(capacity.moment_resistance)} kNm`],
+      ["Utilisation (bending / shear)", `${f(capacity.utilization_bending)} / ${f(capacity.utilization_shear)}`],
+    ],
+    status: summary.status, report,
+  }));
   const ctx = { summary, materials, loads, forces, capacity, reinforcement, sls, notes, report, fd, shd, dd, pass, r, codeShort, bw, d_eff, sheetRef, setReportOpen, reportOpen, navigate };
 
   return (
@@ -76,7 +98,7 @@ export default function BeamResults() {
             <button onClick={() => setReportOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-[#0A2F44] dark:border-[#66a4c2] px-3 py-1.5 text-[12px] font-medium text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#e6f0f5] dark:hover:bg-[#1e3a4a]">
               <FiFileText size={14} /> Detailed Report (PDF)
             </button>
-            <button onClick={() => exportElementToPdf(sheetRef.current, `Beam-${summary.beam_id || "report"}`)} className="flex items-center gap-1.5 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#082636]">
+            <button onClick={() => downloadPdf()} className="flex items-center gap-1.5 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#082636]">
               <FiDownload size={14} /> Download Report
             </button>
           </div>
@@ -153,20 +175,20 @@ export default function BeamResults() {
               ]} />
             </Card>
 
-            <Card n="7" title="Flexural Design (EC2 \u00a76.1)">
+            <Card n="7" title={"Flexural Design (EC2 \u00a76.1)"}>
               {fd ? (
                 <div className="space-y-1.5">
                   <DRow label="Section type" value={fd.is_t_beam ? `T-beam, b_eff = ${f(fd.beff_mm, 0)} mm` : `Rectangular, b = ${f(bw, 0)} mm`} />
-                  <DRow label="K = M_Ed / (b\u00b7d\u00b2\u00b7f_ck)" value={`${f(forces.max_moment)}\u00d710\u2076 / (${f(fd.beff_mm, 0)}\u00d7${f(d_eff, 0)}\u00b2\u00d7${f(materials.fck, 0)})`} result={`K = ${f(fd.K, 4)}`} />
+                  <DRow label={"K = M_Ed / (b\u00b7d\u00b2\u00b7f_ck)"} value={`${f(forces.max_moment)}\u00d710\u2076 / (${f(fd.beff_mm, 0)}\u00d7${f(d_eff, 0)}\u00b2\u00d7${f(materials.fck, 0)})`} result={`K = ${f(fd.K, 4)}`} />
                   <DRow label="Compression steel check" value={`K = ${f(fd.K, 4)} vs K' = ${f(fd.K_balanced, 3)}`} result={fd.K <= fd.K_balanced ? "singly reinforced" : "compression steel required"} ok={fd.K <= fd.K_balanced} />
                   <DRow label="Lever arm, z" value={`d(0.5+\u221a(0.25\u2212K/${codeShort === "EC2" ? "1.134" : "0.9"}))`} result={`z = ${f(fd.z_mm, 1)} mm (\u2264 0.95d)`} />
                   <DRow label="Neutral axis, x" value={`x = ${f(fd.neutral_axis_mm, 1)} mm`} result={fd.is_t_beam ? (fd.neutral_axis_in_flange ? "within flange \u2014 OK" : "below flange \u2014 review") : "\u2014"} ok={!fd.is_t_beam || fd.neutral_axis_in_flange} />
-                  <DRow label="A_s,min (EC2 \u00a79.2.1.1)" value="max(0.26 f_ctm/f_yk\u00b7b\u00b7d, 0.0013\u00b7b\u00b7d)" result={`${f(fd.as_min_mm2, 0)} mm\u00b2`} />
+                  <DRow label={"A_s,min (EC2 \u00a79.2.1.1)"} value={"max(0.26 f_ctm/f_yk\u00b7b\u00b7d, 0.0013\u00b7b\u00b7d)"} result={`${f(fd.as_min_mm2, 0)} mm\u00b2`} />
                   <DRow label="A_s,req vs A_s,provided" value={`${f(r.tension.area_required, 0)} vs ${f(r.tension.area_provided, 0)} mm\u00b2`} result={r.tension.label} ok={r.tension.area_provided >= r.tension.area_required} />
                   <div className="mt-2 flex items-center justify-between rounded-md bg-[#f8fafc] dark:bg-[#0b0f19] px-3 py-2">
                     <span className={`text-xs font-semibold ${SUB}`}>M_Ed / M_Rd</span>
                     <span className={`text-sm font-bold ${capacity.utilization_bending <= 1 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                      {f(forces.max_moment)} / {f(capacity.moment_resistance)} kN\u00b7m &nbsp;({f(capacity.utilization_bending)})
+                      {f(forces.max_moment)} / {f(capacity.moment_resistance)} kN·m &nbsp;({f(capacity.utilization_bending)})
                     </span>
                   </div>
                 </div>
@@ -178,16 +200,16 @@ export default function BeamResults() {
               )}
             </Card>
 
-            <Card n="7b" title="Shear Design (EC2 \u00a76.2.2)">
+            <Card n="7b" title={"Shear Design (EC2 \u00a76.2.2)"}>
               {shd ? (
                 <div className="space-y-1.5">
-                  <DRow label="Steel ratio, \u03c1_l = A_s,prov/(b\u00b7d)" value="\u2264 0.02" result={`\u03c1_l = ${f(shd.rho_l, 5)}`} />
-                  <DRow label="Size factor, k = 1+\u221a(200/d)" value="\u2264 2.0" result={`k = ${f(shd.k_factor, 3)}`} />
+                  <DRow label={"Steel ratio, \u03c1_l = A_s,prov/(b\u00b7d)"} value={"\u2264 0.02"} result={`\u03c1_l = ${f(shd.rho_l, 5)}`} />
+                  <DRow label={"Size factor, k = 1+\u221a(200/d)"} value={"\u2264 2.0"} result={`k = ${f(shd.k_factor, 3)}`} />
                   {codeShort === "EC2" && <>
-                    <DRow label="C_Rd,c = 0.18/\u03b3_c" value="0.18/1.50" result={`${f(shd.C_Rdc, 3)}`} />
-                    <DRow label="v_min = 0.035\u00b7k^1.5\u00b7\u221af_ck" value="" result={`${f(shd.v_min_mpa, 3)} MPa`} />
+                    <DRow label={"C_Rd,c = 0.18/\u03b3_c"} value="0.18/1.50" result={`${f(shd.C_Rdc, 3)}`} />
+                    <DRow label={"v_min = 0.035\u00b7k^1.5\u00b7\u221af_ck"} value="" result={`${f(shd.v_min_mpa, 3)} MPa`} />
                   </>}
-                  <DRow label="v_Ed = V_Ed/(b\u00b7d)" value="" result={`${f(shd.v_ed_mpa, 3)} MPa`} />
+                  <DRow label={"v_Ed = V_Ed/(b\u00b7d)"} value="" result={`${f(shd.v_ed_mpa, 3)} MPa`} />
                   <DRow label="v_Rd,c = max(main term, v_min)" value="" result={`${f(shd.v_rdc_mpa, 3)} MPa`} ok={shd.v_ed_mpa <= shd.v_rdc_mpa} />
                   <div className="mt-2 flex items-center justify-between rounded-md bg-[#f8fafc] dark:bg-[#0b0f19] px-3 py-2">
                     <span className={`text-xs font-semibold ${SUB}`}>V_Ed / V_Rd,c</span>
@@ -242,17 +264,17 @@ export default function BeamResults() {
               </div>
             </Card>
 
-            <Card n="12" title="Deflection Design (EC2 \u00a77.4.2, two-stage)">
+            <Card n="12" title={"Deflection Design (EC2 \u00a77.4.2, two-stage)"}>
               {dd ? (
                 <div className="space-y-1.5">
                   <DRow label="Structural system factor, K" value="EC2 Table 7.4N" result={`K = ${f(dd.K_sys, 2)}`} />
-                  <DRow label="\u03c1 = A_s,req/(b\u00b7d)" value="" result={`\u03c1 = ${f(dd.rho, 5)}`} />
-                  <DRow label="\u03c1\u2080 = \u221af_ck/1000" value="" result={`\u03c1\u2080 = ${f(dd.rho0, 5)}`} />
+                  <DRow label={"\u03c1 = A_s,req/(b\u00b7d)"} value="" result={`\u03c1 = ${f(dd.rho, 5)}`} />
+                  <DRow label={"\u03c1\u2080 = \u221af_ck/1000"} value="" result={`\u03c1\u2080 = ${f(dd.rho0, 5)}`} />
                   <DRow label="Branch" value={dd.rho <= dd.rho0 ? "\u03c1 \u2264 \u03c1\u2080" : "\u03c1 > \u03c1\u2080"} result={dd.rho <= dd.rho0 ? "lightly reinforced (A)" : "heavily reinforced (B)"} />
-                  <DRow label="(L/d)_basic" value="EC2 \u00a77.4.2 formula" result={f(dd.ld_basic, 2)} />
+                  <DRow label="(L/d)_basic" value={"EC2 \u00a77.4.2 formula"} result={f(dd.ld_basic, 2)} />
                   <DRow label="Base check (actual vs basic, before enhancement)" value="" result={dd.base_status} ok={dd.base_status === "PASS"} />
                   <DRow label="Enhancement factor, F3" value={dd.enhanced ? "base check failed \u2192 F3 = A_s,prov/A_s,req (\u22641.5)" : "base check already passes \u2014 not required"} result={`F3 = ${f(dd.F3, 3)}`} />
-                  <DRow label="Allowable (L/d) = basic \u00d7 F3" value="" result={f(sls.deflection_limit, 2)} />
+                  <DRow label={"Allowable (L/d) = basic \u00d7 F3"} value="" result={f(sls.deflection_limit, 2)} />
                   <div className={`mt-2 flex items-center justify-between rounded-md px-3 py-2 ${isPass(sls.deflection_status) ? "bg-green-50 dark:bg-green-900/20" : "bg-red-50 dark:bg-red-900/20"}`}>
                     <span className={`text-xs font-semibold ${SUB}`}>Actual L/d vs Allowable</span>
                     <span className={`text-sm font-bold ${isPass(sls.deflection_status) ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
@@ -294,7 +316,7 @@ export default function BeamResults() {
                 <span className="flex items-center gap-2"><FiFileText size={15} /> View Full Calculation Report</span>
                 <FiChevronRight size={16} />
               </button>
-              <button onClick={() => exportElementToPdf(sheetRef.current, `Beam-${summary.beam_id || "report"}`)} className="flex w-full items-center justify-between rounded-lg border border-[#0A2F44] dark:border-[#66a4c2] px-4 py-2.5 text-sm font-medium text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#e6f0f5] dark:hover:bg-[#1e3a4a]">
+              <button onClick={() => downloadPdf()} className="flex w-full items-center justify-between rounded-lg border border-[#0A2F44] dark:border-[#66a4c2] px-4 py-2.5 text-sm font-medium text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#e6f0f5] dark:hover:bg-[#1e3a4a]">
                 <span className="flex items-center gap-2"><FiFileText size={15} /> Export Summary Sheet (PDF)</span>
                 <FiChevronRight size={16} />
               </button>
@@ -326,20 +348,20 @@ function FlexuralTab({ ctx }) {
   const { summary, materials, forces, capacity, reinforcement: r, fd, codeShort, bw, d_eff } = ctx;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-      <Card n="" title="Flexural Design \u2014 Full Derivation (EC2 \u00a76.1)">
+      <Card n="" title={"Flexural Design \u2014 Full Derivation (EC2 \u00a76.1)"}>
         {fd ? (
           <div className="space-y-1.5">
             <DRow label="Section type" value={fd.is_t_beam ? `T-beam, b_eff = ${f(fd.beff_mm, 0)} mm` : `Rectangular, b = ${f(bw, 0)} mm`} />
-            <DRow label="K = M_Ed / (b\u00b7d\u00b2\u00b7f_ck)" value={`${f(forces.max_moment)}\u00d710\u2076 / (${f(fd.beff_mm, 0)}\u00d7${f(d_eff, 0)}\u00b2\u00d7${f(materials.fck, 0)})`} result={`K = ${f(fd.K, 4)}`} />
+            <DRow label={"K = M_Ed / (b\u00b7d\u00b2\u00b7f_ck)"} value={`${f(forces.max_moment)}\u00d710\u2076 / (${f(fd.beff_mm, 0)}\u00d7${f(d_eff, 0)}\u00b2\u00d7${f(materials.fck, 0)})`} result={`K = ${f(fd.K, 4)}`} />
             <DRow label="Compression steel check" value={`K = ${f(fd.K, 4)} vs K' = ${f(fd.K_balanced, 3)}`} result={fd.K <= fd.K_balanced ? "singly reinforced" : "compression steel required"} ok={fd.K <= fd.K_balanced} />
             <DRow label="Lever arm, z" value={`d(0.5+\u221a(0.25\u2212K/${codeShort === "EC2" ? "1.134" : "0.9"}))`} result={`z = ${f(fd.z_mm, 1)} mm (\u2264 0.95d)`} />
             <DRow label="Neutral axis, x" value={`x = ${f(fd.neutral_axis_mm, 1)} mm`} result={fd.is_t_beam ? (fd.neutral_axis_in_flange ? "within flange \u2014 OK" : "below flange \u2014 review") : "\u2014 (rectangular section)"} ok={!fd.is_t_beam || fd.neutral_axis_in_flange} />
-            <DRow label="A_s,min (EC2 \u00a79.2.1.1)" value="max(0.26 f_ctm/f_yk\u00b7b\u00b7d, 0.0013\u00b7b\u00b7d)" result={`${f(fd.as_min_mm2, 0)} mm\u00b2`} />
+            <DRow label={"A_s,min (EC2 \u00a79.2.1.1)"} value={"max(0.26 f_ctm/f_yk\u00b7b\u00b7d, 0.0013\u00b7b\u00b7d)"} result={`${f(fd.as_min_mm2, 0)} mm\u00b2`} />
             <DRow label="A_s,req vs A_s,provided" value={`${f(r.tension.area_required, 0)} vs ${f(r.tension.area_provided, 0)} mm\u00b2`} result={r.tension.label} ok={r.tension.area_provided >= r.tension.area_required} />
             <div className="mt-2 flex items-center justify-between rounded-md bg-[#f8fafc] dark:bg-[#0b0f19] px-3 py-2">
               <span className={`text-xs font-semibold ${SUB}`}>M_Ed / M_Rd</span>
               <span className={`text-sm font-bold ${capacity.utilization_bending <= 1 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                {f(forces.max_moment)} / {f(capacity.moment_resistance)} kN\u00b7m &nbsp;({f(capacity.utilization_bending)})
+                {f(forces.max_moment)} / {f(capacity.moment_resistance)} kN·m &nbsp;({f(capacity.utilization_bending)})
               </span>
             </div>
           </div>
@@ -358,16 +380,16 @@ function ShearTab({ ctx }) {
   const { summary, forces, capacity, shd, codeShort } = ctx;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-      <Card n="" title="Shear Design \u2014 Full Derivation (EC2 \u00a76.2.2)">
+      <Card n="" title={"Shear Design \u2014 Full Derivation (EC2 \u00a76.2.2)"}>
         {shd ? (
           <div className="space-y-1.5">
-            <DRow label="Steel ratio, \u03c1_l = A_s,prov/(b\u00b7d)" value="\u2264 0.02" result={`\u03c1_l = ${f(shd.rho_l, 5)}`} />
-            <DRow label="Size factor, k = 1+\u221a(200/d)" value="\u2264 2.0" result={`k = ${f(shd.k_factor, 3)}`} />
+            <DRow label={"Steel ratio, \u03c1_l = A_s,prov/(b\u00b7d)"} value={"\u2264 0.02"} result={`\u03c1_l = ${f(shd.rho_l, 5)}`} />
+            <DRow label={"Size factor, k = 1+\u221a(200/d)"} value={"\u2264 2.0"} result={`k = ${f(shd.k_factor, 3)}`} />
             {codeShort === "EC2" && <>
-              <DRow label="C_Rd,c = 0.18/\u03b3_c" value="0.18/1.50" result={`${f(shd.C_Rdc, 3)}`} />
-              <DRow label="v_min = 0.035\u00b7k^1.5\u00b7\u221af_ck" value="" result={`${f(shd.v_min_mpa, 3)} MPa`} />
+              <DRow label={"C_Rd,c = 0.18/\u03b3_c"} value="0.18/1.50" result={`${f(shd.C_Rdc, 3)}`} />
+              <DRow label={"v_min = 0.035\u00b7k^1.5\u00b7\u221af_ck"} value="" result={`${f(shd.v_min_mpa, 3)} MPa`} />
             </>}
-            <DRow label="v_Ed = V_Ed/(b\u00b7d)" value="" result={`${f(shd.v_ed_mpa, 3)} MPa`} />
+            <DRow label={"v_Ed = V_Ed/(b\u00b7d)"} value="" result={`${f(shd.v_ed_mpa, 3)} MPa`} />
             <DRow label="v_Rd,c = max(main term, v_min)" value="" result={`${f(shd.v_rdc_mpa, 3)} MPa`} ok={shd.v_ed_mpa <= shd.v_rdc_mpa} />
             <div className="mt-2 flex items-center justify-between rounded-md bg-[#f8fafc] dark:bg-[#0b0f19] px-3 py-2">
               <span className={`text-xs font-semibold ${SUB}`}>V_Ed / V_Rd,c</span>
@@ -391,17 +413,17 @@ function DeflectionTab({ ctx }) {
   const { summary, sls, dd } = ctx;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-      <Card n="" title="Deflection Design \u2014 Full Derivation (EC2 \u00a77.4.2, two-stage)">
+      <Card n="" title={"Deflection Design \u2014 Full Derivation (EC2 \u00a77.4.2, two-stage)"}>
         {dd ? (
           <div className="space-y-1.5">
             <DRow label="Structural system factor, K" value="EC2 Table 7.4N" result={`K = ${f(dd.K_sys, 2)}`} />
-            <DRow label="\u03c1 = A_s,req/(b\u00b7d)" value="" result={`\u03c1 = ${f(dd.rho, 5)}`} />
-            <DRow label="\u03c1\u2080 = \u221af_ck/1000" value="" result={`\u03c1\u2080 = ${f(dd.rho0, 5)}`} />
+            <DRow label={"\u03c1 = A_s,req/(b\u00b7d)"} value="" result={`\u03c1 = ${f(dd.rho, 5)}`} />
+            <DRow label={"\u03c1\u2080 = \u221af_ck/1000"} value="" result={`\u03c1\u2080 = ${f(dd.rho0, 5)}`} />
             <DRow label="Branch" value={dd.rho <= dd.rho0 ? "\u03c1 \u2264 \u03c1\u2080" : "\u03c1 > \u03c1\u2080"} result={dd.rho <= dd.rho0 ? "lightly reinforced (A)" : "heavily reinforced (B)"} />
-            <DRow label="(L/d)_basic" value="EC2 \u00a77.4.2 formula" result={f(dd.ld_basic, 2)} />
+            <DRow label="(L/d)_basic" value={"EC2 \u00a77.4.2 formula"} result={f(dd.ld_basic, 2)} />
             <DRow label="Base check (actual vs basic, before enhancement)" value="" result={dd.base_status} ok={dd.base_status === "PASS"} />
             <DRow label="Enhancement factor, F3" value={dd.enhanced ? "base check failed \u2192 F3 = A_s,prov/A_s,req (\u22641.5)" : "base check already passes \u2014 not required"} result={`F3 = ${f(dd.F3, 3)}`} />
-            <DRow label="Allowable (L/d) = basic \u00d7 F3" value="" result={f(sls.deflection_limit, 2)} />
+            <DRow label={"Allowable (L/d) = basic \u00d7 F3"} value="" result={f(sls.deflection_limit, 2)} />
             <div className={`mt-2 flex items-center justify-between rounded-md px-3 py-2 ${isPass(sls.deflection_status) ? "bg-green-50 dark:bg-green-900/20" : "bg-red-50 dark:bg-red-900/20"}`}>
               <span className={`text-xs font-semibold ${SUB}`}>Actual L/d vs Allowable</span>
               <span className={`text-sm font-bold ${isPass(sls.deflection_status) ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
@@ -632,7 +654,7 @@ function BMDSVG({ mMax, span }) {
       <svg viewBox="0 0 380 170" className="w-full">
         <path d={`M${x0},${base} Q${mid},${base + 2 * depth} ${x1},${base} Z`} fill={RED} fillOpacity="0.75" stroke={RED} strokeWidth="1.4" />
         <text x={mid} y={base + depth + 4} fontSize="13" fill="#fff" textAnchor="middle" fontWeight="bold">+</text>
-        <text x={mid} y={base - 8} fontSize="11" fill={RED} textAnchor="middle" fontWeight="bold">M_Ed,max = {f(mMax)} kN\u00b7m</text>
+        <text x={mid} y={base - 8} fontSize="11" fill={RED} textAnchor="middle" fontWeight="bold">M_Ed,max = {f(mMax)} kN{"\u00b7"}m</text>
         <text x={x0 - 4} y={base + 4} fontSize="10" fill="currentColor" textAnchor="end">0</text>
         <text x={x1 + 4} y={base + 4} fontSize="10" fill="currentColor">0</text>
         <line x1={x0} y1={base + depth + 22} x2={x1} y2={base + depth + 22} stroke={DIM} strokeWidth="1" markerStart="url(#bm)" markerEnd="url(#bm)" />

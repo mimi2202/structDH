@@ -1,4 +1,6 @@
 # backend/services/foundation_service.py
+import math
+
 from models.foundation_schemas import (
     PadFoundationRequest, PadFoundationResponse,
     GeometryOut, SoilPressureOut, CornersOut, DesignMomentsOut,
@@ -64,6 +66,13 @@ def calculate_pad_foundation(request: PadFoundationRequest) -> PadFoundationResp
         bar_dia_mm=request.bar_dia_mm,
         gamma_c=request.gamma_c,
         gamma_s=request.gamma_s,
+        service_axial_kN=request.service_axial_kN,
+        service_moment_x_kNm=request.service_moment_x_kNm,
+        service_moment_y_kNm=request.service_moment_y_kNm,
+        column_shape=request.column_shape,
+        column_offset_x_mm=request.column_offset_x_mm,
+        column_offset_y_mm=request.column_offset_y_mm,
+        column_pinned=request.column_fixity == "pinned",
     )
 
     res = design_pad_foundation(inp)
@@ -75,15 +84,16 @@ def calculate_pad_foundation(request: PadFoundationRequest) -> PadFoundationResp
     # figures the page actually displays (bearing, shear, punching) --
     # flexural status is shown separately as a pass/fail chip, not folded
     # into a percentage, so it is not part of this max.
-    bearing_pct = (res.qmax / request.allowable_bearing_kN_m2) * 100.0
+    bearing_pct = (res.sls_qmax / request.allowable_bearing_kN_m2) * 100.0
     shear_pct = max(
         (res.shear_x.VEd_kN_m / res.shear_x.VRdc_kN_m) * 100.0 if res.shear_x.VRdc_kN_m else 0.0,
         (res.shear_y.VEd_kN_m / res.shear_y.VRdc_kN_m) * 100.0 if res.shear_y.VRdc_kN_m else 0.0,
     )
-    punching_pct = (res.punching.vEd / res.punching.vRdc) * 100.0 if res.punching.vRdc else 0.0
+    punching_pct = max(res.punching.ratio, res.punching.ratio0) * 100.0
     overall_pct = max(bearing_pct, shear_pct, punching_pct)
 
     corners_by_key = _corners_to_c1234(res.corner_pressures)
+    sls_corners_by_key = _corners_to_c1234(res.sls_corner_pressures)
 
     return PadFoundationResponse(
         task_id="completed", status=res.overall_status, load_case=res.load_case,
@@ -98,12 +108,24 @@ def calculate_pad_foundation(request: PadFoundationRequest) -> PadFoundationResp
             d_eff_x_mm=round(res.d_eff_x_mm, 1),
             d_eff_y_mm=round(res.d_eff_y_mm, 1),
             cover_mm=request.cover_mm,
+            column_shape=request.column_shape,
+            column_offset_x_mm=request.column_offset_x_mm,
+            column_offset_y_mm=request.column_offset_y_mm,
+            column_fixity=request.column_fixity,
         ),
         soil_pressure=SoilPressureOut(
-            q0=round(res.q0, 3), qmax=round(res.qmax, 3), qmin=round(res.qmin, 3),
+            q0=round(res.sls_q0, 3), qmax=round(res.sls_qmax, 3), qmin=round(res.sls_qmin, 3),
             bearing_ok=(res.bearing_status == "OK"), uplift_ok=(res.uplift_status == "OK"),
+            corners=CornersOut(**{k: round(v, 3) for k, v in sls_corners_by_key.items()}),
+        ),
+        soil_pressure_uls=SoilPressureOut(
+            q0=round(res.q0, 3), qmax=round(res.qmax, 3), qmin=round(res.qmin, 3),
+            bearing_ok=(res.bearing_status == "OK"), uplift_ok=(res.qmin >= 0),
             corners=CornersOut(**{k: round(v, 3) for k, v in corners_by_key.items()}),
         ),
+        sls_from_uls=res.sls_from_uls,
+        footing_weight_kN=round(res.footing_weight_kN, 2),
+        sls_total_load_kN=round(res.sls_total_load_kN, 2),
         design_moments=DesignMomentsOut(
             Mx_kNm_per_m=round(res.Mx_kNm_per_m, 3), My_kNm_per_m=round(res.My_kNm_per_m, 3),
         ),
@@ -121,12 +143,18 @@ def calculate_pad_foundation(request: PadFoundationRequest) -> PadFoundationResp
         ),
         one_way_shear=OneWayShearOut(
             x=ShearDirectionOut(VEd_kN_per_m=round(res.shear_x.VEd_kN_m, 3),
-                                VRdc_kN_per_m=round(res.shear_x.VRdc_kN_m, 3), status=res.shear_x.status),
+                                VRdc_kN_per_m=round(res.shear_x.VRdc_kN_m, 3), status=res.shear_x.status,
+                                rho_l=round(res.shear_x.rho_l, 5)),
             y=ShearDirectionOut(VEd_kN_per_m=round(res.shear_y.VEd_kN_m, 3),
-                                VRdc_kN_per_m=round(res.shear_y.VRdc_kN_m, 3), status=res.shear_y.status),
+                                VRdc_kN_per_m=round(res.shear_y.VRdc_kN_m, 3), status=res.shear_y.status,
+                                rho_l=round(res.shear_y.rho_l, 5)),
         ),
         punching=PunchingOut(vEd_MPa=round(res.punching.vEd, 4), vRdc_MPa=round(res.punching.vRdc, 4),
-                             status=res.punching.status),
+                             status=res.punching.status, applicable=res.punching.applicable,
+                             a_mm=round(res.punching.a_mm, 1), u_m=round(res.punching.u1_m, 3),
+                             beta=round(res.punching.beta, 3), VEd_red_kN=round(res.punching.VEd_punch_kN, 2),
+                             vRd_MPa=round(res.punching.vRd, 4), v0_MPa=round(res.punching.v0, 4),
+                             vRdmax_MPa=round(res.punching.vRdmax, 4)),
         utilisation=UtilisationOut(
             overall_pct=round(overall_pct, 1), bearing_pct=round(bearing_pct, 1),
             shear_pct=round(shear_pct, 1), punching_pct=round(punching_pct, 1),
@@ -182,10 +210,18 @@ def _build_report(request: PadFoundationRequest, res) -> list:
         R("Axial load", f"NEd = {d.axial_load_kN:.3f} kN", f"{d.axial_load_kN:.3f} kN"),
         R("Moment about x-axis", f"Mx = {d.moment_x_kNm:.3f} kNm", f"{d.moment_x_kNm:.3f} kNm"),
         R("Moment about y-axis", f"My = {d.moment_y_kNm:.3f} kNm", f"{d.moment_y_kNm:.3f} kNm"),
+        R("Service (SLS) loads", (f"N = {res.sls_total_load_kN - res.footing_weight_kN:.3f} kN, Mx = {res.sls_Mx_kNm:.3f}, "
+                                  f"My = {res.sls_My_kNm:.3f} kNm" if not res.sls_from_uls else
+                                  "not entered -- the ULS loads are used for bearing (conservative)"),
+          "bearing check"),
         R("Load case", "classified from Mx, My", res.load_case),
         R("Footing", f"L = {d.footing_length_mm:.0f} mm, B = {d.footing_width_mm:.0f} mm, "
                     f"h = {d.footing_depth_mm:.0f} mm", "adopted"),
-        R("Column", f"cx = {d.column_x_mm:.0f} mm, cy = {d.column_y_mm:.0f} mm", "adopted"),
+        R("Column", (f"circular, D = {d.column_x_mm:.0f} mm" if d.column_shape == "circular"
+                     else f"rectangular, cx = {d.column_x_mm:.0f} mm, cy = {d.column_y_mm:.0f} mm")
+          + f", {d.column_fixity} base", "adopted"),
+        R("Column position", f"offset from footing centre: ox = {d.column_offset_x_mm:.0f} mm, "
+                             f"oy = {d.column_offset_y_mm:.0f} mm", "adopted"),
         R("Materials", f"fck = {d.concrete_grade_fck:.1f} N/mm2, fyk = {d.steel_grade_fyk:.1f} N/mm2",
           "adopted"),
         R("Soil", f"Allowable bearing = {d.allowable_bearing_kN_m2:.1f} kN/m2", "adopted"),
@@ -193,12 +229,20 @@ def _build_report(request: PadFoundationRequest, res) -> list:
     ]})
 
     # ---------------- 3. Geometry ----------------
-    sec.append({"section": "3. Geometry", "rows": [
-        R("Footing area", f"A = L x B = {res.L_m:.3f} x {res.B_m:.3f}", f"A = {res.area_m2:.3f} m2"),
-        R("Projection from column face", f"a_x = (L - cx)/2 = ({d.footing_length_mm:.0f} - {d.column_x_mm:.0f})/2",
+    geo = [R("Footing area", f"A = L x B = {res.L_m:.3f} x {res.B_m:.3f}", f"A = {res.area_m2:.3f} m2")]
+    if d.column_shape == "circular":
+        geo.append(R("Circular column", f"bending/shear face: equal-area square, side = 0.886 D = 0.886 x {d.column_x_mm:.0f}",
+                     f"{res.column_face_x_mm:.1f} mm"))
+    geo += [
+        R("Projection from column face", f"a_x = (L - cx)/2 + |ox| = ({d.footing_length_mm:.0f} - {res.column_face_x_mm:.1f})/2 + {abs(d.column_offset_x_mm):.0f}",
           f"a_x = {res.projection_x_mm:.1f} mm"),
-        R("Projection from column face", f"a_y = (B - cy)/2 = ({d.footing_width_mm:.0f} - {d.column_y_mm:.0f})/2",
+        R("Projection from column face", f"a_y = (B - cy)/2 + |oy| = ({d.footing_width_mm:.0f} - {res.column_face_y_mm:.1f})/2 + {abs(d.column_offset_y_mm):.0f}",
           f"a_y = {res.projection_y_mm:.1f} mm"),
+    ]
+    if d.column_offset_x_mm or d.column_offset_y_mm:
+        geo.append(R("Offset column", "larger overhang designed; shorter overhang limits the punching perimeter",
+                     f"short side a_x = {res.projection_x_min_mm:.0f}, a_y = {res.projection_y_min_mm:.0f} mm"))
+    sec.append({"section": "3. Geometry", "rows": geo + [
         R("Effective depth", "d_x = h - cover - bar diameter/2", f"d_x = {res.d_eff_x_mm:.1f} mm"),
         R("Effective depth", "d_y = h - cover - first layer bar - second layer bar/2",
           f"d_y = {res.d_eff_y_mm:.1f} mm"),
@@ -206,9 +250,12 @@ def _build_report(request: PadFoundationRequest, res) -> list:
 
     # ---------------- 4. Eccentricity Check ----------------
     sec.append({"section": "4. Eccentricity Check", "rows": [
-        R("EN 1992-1-1 Cl. 9.8", f"ex = My / NEd = {d.moment_y_kNm:.3f} / {d.axial_load_kN:.3f}",
+        R("Moments about footing centre", ("pinned base: column moments not transferred; " if d.column_fixity == "pinned" else "")
+          + f"Mx = Mx,col + NEd oy, My = My,col + NEd ox",
+          f"Mx = {res.Mx_total_kNm:.3f}, My = {res.My_total_kNm:.3f} kNm"),
+        R("EN 1992-1-1 Cl. 9.8", f"ex = My / NEd = {res.My_total_kNm:.3f} / {d.axial_load_kN:.3f}",
           f"ex = {res.ex_m:.4f} m"),
-        R("EN 1992-1-1 Cl. 9.8", f"ey = Mx / NEd = {d.moment_x_kNm:.3f} / {d.axial_load_kN:.3f}",
+        R("EN 1992-1-1 Cl. 9.8", f"ey = Mx / NEd = {res.Mx_total_kNm:.3f} / {d.axial_load_kN:.3f}",
           f"ey = {res.ey_m:.4f} m"),
         R("Middle third limits", f"L/6 = {res.L_m/6:.4f} m, B/6 = {res.B_m/6:.4f} m", "limits"),
         R("Check", "ex within middle third", "OK" if res.ex_within_middle_third else "NOT OK"),
@@ -217,17 +264,29 @@ def _build_report(request: PadFoundationRequest, res) -> list:
 
     # ---------------- 5. Soil Pressure Distribution ----------------
     rows = [
-        R("Average bearing pressure", f"q0 = NEd / A = {d.axial_load_kN:.3f} / {res.area_m2:.3f}",
-          f"q0 = {res.q0:.3f} kN/m2"),
+        R("EN 1997-1", "Bearing is checked on SLS loads against the allowable bearing pressure; "
+                       "structural design (sections 6-11) uses the ULS net pressure.", "method"),
+        R("Footing self-weight", f"W_f = L x B x h x gamma_c = {res.L_m:.3f} x {res.B_m:.3f} x "
+                                 f"{d.footing_depth_mm/1000:.3f} x 25.0", f"W_f = {res.footing_weight_kN:.2f} kN"),
+        R("SLS total load", ("N = N,sls + W_f" if not res.sls_from_uls else "N = NEd + W_f (no service loads entered)"),
+          f"N = {res.sls_total_load_kN:.2f} kN"),
+        R("Eccentricities (SLS)", f"ex = My/N = {res.sls_My_kNm:.3f}/{res.sls_total_load_kN:.2f}, "
+                                  f"ey = Mx/N = {res.sls_Mx_kNm:.3f}/{res.sls_total_load_kN:.2f}",
+          f"ex = {res.sls_ex_m:.4f} m, ey = {res.sls_ey_m:.4f} m"),
+        R("Average bearing pressure", f"q0 = N / A = {res.sls_total_load_kN:.2f} / {res.area_m2:.3f}",
+          f"q0 = {res.sls_q0:.3f} kN/m2"),
         R("Biaxial corner pressures", "q = q0(1 ± 6ex/L ± 6ey/B)", "four corners computed"),
     ]
-    for name, q in res.corner_pressures.items():
-        rows.append(R("Corner pressure", name, f"{q:.3f} kN/m2"))
+    for name, q in res.sls_corner_pressures.items():
+        rows.append(R("Corner pressure (SLS)", name, f"{q:.3f} kN/m2"))
     rows += [
         R("Governing", "qmax, qmin across the four corners",
-          f"qmax = {res.qmax:.3f} kN/m2, qmin = {res.qmin:.3f} kN/m2"),
+          f"qmax = {res.sls_qmax:.3f} kN/m2, qmin = {res.sls_qmin:.3f} kN/m2"),
         R("Bearing check", f"qmax vs allowable {d.allowable_bearing_kN_m2:.3f} kN/m2", res.bearing_status),
         R("Uplift check", "qmin >= 0, no tension", res.uplift_status),
+        R("ULS net pressure (for design)", f"q0 = NEd / A = {d.axial_load_kN:.3f} / {res.area_m2:.3f}, "
+                                           "corners with ULS moments",
+          f"q0 = {res.q0:.3f}, qmax = {res.qmax:.3f}, qmin = {res.qmin:.3f} kN/m2"),
     ]
     sec.append({"section": "5. Soil Pressure Distribution", "rows": rows})
 
@@ -249,7 +308,8 @@ def _build_report(request: PadFoundationRequest, res) -> list:
               f"K = {flex.K:.5f}"),
             R("Lever arm (EC2)", "z = d[0.5 + sqrt(0.25 - K/1.134)]", f"z = {flex.z_mm:.1f} mm"),
             R("Required steel", "As = M/(0.87 fyk z)", f"As,req = {flex.As_req:.2f} mm2/m"),
-            R("Minimum steel", "As,min = max(0.26 fctm/fyk b d, 0.0013 b d)", f"As,min = {flex.As_min:.2f} mm2/m"),
+            R("Minimum steel", "As,min = max(0.26 fctm/fyk b d, 0.0013 b d), fctm = 0.30 fck^(2/3) (Table 3.1)",
+              f"As,min = {flex.As_min:.2f} mm2/m"),
             R("Design steel", "As,design = max(As,req, As,min)", f"As,design = {flex.As_design:.2f} mm2/m"),
             R("Bar spacing", f"Adopt Y{d.bar_dia_mm:.0f} @ {flex.spacing_mm:.0f} mm c/c",
               f"As,provided = {flex.As_provided:.2f} mm2/m"),
@@ -262,31 +322,70 @@ def _build_report(request: PadFoundationRequest, res) -> list:
          ("Y", res.shear_y, res.projection_y_mm, res.d_eff_y_mm)], start=9
     ):
         sec.append({"section": f"{i}. One-Way Shear Check — {label} Direction", "rows": [
-            R("Critical section", "at distance d from column face", f"projection = {proj/1000:.3f} m, d = {d_eff/1000:.3f} m"),
-            R("EC2 Cl. 6.2.2", "VEd = q x shear length", f"VEd = {shear.VEd_kN_m:.3f} kN/m"),
-            R("EC2 Cl. 6.2.2", "VRd,c = max(C_Rd,c k (100 rho fck)^(1/3), vmin) x bw x d", f"VRd,c = {shear.VRdc_kN_m:.3f} kN/m"),
+            R("EC2 Cl. 6.2.1(8)", "critical section at distance d from column face", f"projection = {proj/1000:.3f} m, d = {d_eff/1000:.3f} m"),
+            R("EC2 Cl. 6.2.2", f"VEd = qmax x (a - d) = {res.qmax:.3f} x {max(proj/1000 - d_eff/1000, 0):.3f}"
+                               + (" (section beyond the footing edge)" if proj <= d_eff else ""),
+              f"VEd = {shear.VEd_kN_m:.3f} kN/m"),
+            R("EC2 Cl. 6.2.2", f"rho_l = As,prov/(b d) <= 0.02, bottom steel spanning {label}", f"rho_l = {shear.rho_l:.5f}"),
+            R("EC2 Cl. 6.2.2", "VRd,c = max(C_Rd,c k (100 rho_l fck)^(1/3), vmin) x bw x d", f"VRd,c = {shear.VRdc_kN_m:.3f} kN/m"),
             R("Check", "VEd <= VRd,c", shear.status),
         ]})
 
     # ---------------- 11. Punching shear ----------------
-    sec.append({"section": "11. Punching Shear Check", "rows": [
-        R("EC2 Cl. 6.4", "Critical perimeter at 2d from column face", f"u1 = {res.punching.u1_m:.3f} m"),
-        R("Upward reaction inside perimeter", "q x area inside", f"{res.punching.upward_reaction_kN:.3f} kN"),
-        R("EC2 Cl. 6.4", "VEd,punch = NEd - upward reaction inside perimeter", f"{res.punching.VEd_punch_kN:.3f} kN"),
-        R("EC2 Cl. 6.4", "vEd = VEd/(u1 x d)", f"vEd = {res.punching.vEd:.4f} N/mm2"),
-        R("EC2 Cl. 6.4", "vRd,c as for one-way shear", f"vRd,c = {res.punching.vRdc:.4f} N/mm2"),
-        R("Check", "vEd <= vRd,c", res.punching.status),
-    ]})
+    pn = res.punching
+    rows = [
+        R("EC2 Cl. 6.4.2(1)", "d = (d_x + d_y)/2, rho_l = sqrt(rho_x rho_y)",
+          f"d = {pn.d_eff_mm:.1f} mm, rho_l = {pn.rho_l:.5f}"),
+        R("EC2 Cl. 6.4.4(1)", "vRd,c = max(C_Rd,c k (100 rho_l fck)^(1/3), vmin)", f"vRd,c = {pn.vRdc:.4f} N/mm2"),
+        R("EC2 Cl. 6.4.4(2)", "Relief from the ULS net soil pressure inside the perimeter"
+          + (", taken under the column centre" if d.column_offset_x_mm or d.column_offset_y_mm else " (q = NEd / A)"),
+          f"q = {pn.q_relief:.3f} kN/m2"),
+    ]
+    if pn.applicable:
+        rows += [
+            R("EC2 Cl. 6.4.4(2)", f"Control perimeters searched at a <= 2d = {2 * pn.d_eff_mm:.0f} mm "
+                                  f"and a <= smaller projection {min(res.projection_x_mm, res.projection_y_mm):.0f} mm",
+              f"governing a = {pn.a_mm:.0f} mm"),
+            R("Control perimeter", "u = pi (D + 2a)" if d.column_shape == "circular" else "u = 2(cx + cy) + 2 pi a",
+              f"u = {pn.u1_m:.3f} m"),
+            R("Relief", f"q x area inside = {pn.q_relief:.3f} x {pn.area_inside_m2:.3f}",
+              f"{pn.upward_reaction_kN:.3f} kN"),
+            R("EC2 Eq. 6.48", "VEd,red = NEd - relief", f"VEd,red = {pn.VEd_punch_kN:.3f} kN"),
+            R("EC2 Eq. 6.51" if d.column_shape != "circular" else "EC2 Eq. 6.53",
+              "beta = 1 + 0.6 pi (|ex| + |ey|)/(D + 2a)" if d.column_shape == "circular"
+              else "beta = 1 + k (MEd/VEd,red)(u/W), both directions", f"beta = {pn.beta:.3f}"),
+            R("EC2 Eq. 6.51", "vEd = beta VEd,red/(u d)", f"vEd = {pn.vEd:.4f} N/mm2"),
+            R("EC2 Eq. 6.50", "vRd = vRd,c x 2d/a", f"vRd = {pn.vRd:.4f} N/mm2"),
+            R("Check", "vEd <= vRd", f"{pn.ratio:.3f} " + ("OK" if pn.ratio <= 1 else "NOT OK")),
+        ]
+    else:
+        rows.append(R("EC2 Cl. 6.4.4(2)", "No control perimeter (a <= 2d) fits on the footing: punching "
+                                          "is not a valid mechanism; one-way shear (sections 9-10) governs"
+                      + ("; edge/corner column: truncated perimeters (EC2 Fig. 6.15) not checked"
+                         if d.column_offset_x_mm or d.column_offset_y_mm else ""),
+                      "not applicable"))
+    rows += [
+        R("EC2 Cl. 6.4.5(3)", "Column face: v0 = beta NEd/(u0 d), u0 = "
+          + (f"pi D = {math.pi * d.column_x_mm / 1000:.3f} m" if d.column_shape == "circular"
+             else f"2(cx + cy) = {2 * (d.column_x_mm + d.column_y_mm) / 1000:.3f} m"),
+          f"v0 = {pn.v0:.4f} N/mm2"),
+        R("EC2 Cl. 6.4.5(3)", "vRd,max = 0.5 nu fcd, nu = 0.6(1 - fck/250) (UK NA)", f"vRd,max = {pn.vRdmax:.4f} N/mm2"),
+        R("Check", "v0 <= vRd,max", f"{pn.ratio0:.3f} " + ("OK" if pn.ratio0 <= 1 else "NOT OK")),
+        R("Punching", "all checks", pn.status),
+    ]
+    sec.append({"section": "11. Punching Shear Check", "rows": rows})
 
     # ---------------- 12. Final Design Summary ----------------
     sec.append({"section": "12. Final Design Summary", "rows": [
-        R("Bearing pressure", f"q0 = {res.q0:.3f}, qmax = {res.qmax:.3f}, qmin = {res.qmin:.3f} kN/m2", res.bearing_status),
+        R("Bearing pressure (SLS)", f"q0 = {res.sls_q0:.3f}, qmax = {res.sls_qmax:.3f}, qmin = {res.sls_qmin:.3f} kN/m2", res.bearing_status),
         R("Design moments", f"Mx = {res.Mx_kNm_per_m:.3f}, My = {res.My_kNm_per_m:.3f} kNm/m", ""),
         R("Reinforcement, X", f"Y{d.bar_dia_mm:.0f} @ {res.flex_x.spacing_mm:.0f} mm c/c", res.flex_x.status),
         R("Reinforcement, Y", f"Y{d.bar_dia_mm:.0f} @ {res.flex_y.spacing_mm:.0f} mm c/c", res.flex_y.status),
         R("One-way shear, X", f"VEd = {res.shear_x.VEd_kN_m:.3f}, VRd,c = {res.shear_x.VRdc_kN_m:.3f} kN/m", res.shear_x.status),
         R("One-way shear, Y", f"VEd = {res.shear_y.VEd_kN_m:.3f}, VRd,c = {res.shear_y.VRdc_kN_m:.3f} kN/m", res.shear_y.status),
-        R("Punching shear", f"vEd = {res.punching.vEd:.4f}, vRd,c = {res.punching.vRdc:.4f} N/mm2", res.punching.status),
+        R("Punching shear", (f"vEd = {res.punching.vEd:.4f}, vRd = {res.punching.vRd:.4f} N/mm2 at a = {res.punching.a_mm:.0f} mm"
+                             if res.punching.applicable else "no control perimeter fits: one-way shear governs")
+          + f"; face v0 = {res.punching.v0:.4f}, vRd,max = {res.punching.vRdmax:.4f} N/mm2", res.punching.status),
         R("Overall", "all checks", res.overall_status),
     ]})
 

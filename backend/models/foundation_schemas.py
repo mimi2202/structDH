@@ -40,13 +40,25 @@ class PadFoundationRequest(BaseModel):
     axial_load_kN: float = Field(..., gt=0)
     moment_x_kNm: float = 0.0
     moment_y_kNm: float = 0.0
+    # SLS loads for the bearing check; axial blank -> the ULS loads are used
+    # (conservative). Blank service moments with a service axial -> ULS moments.
+    service_axial_kN: Optional[float] = Field(None, gt=0)
+    service_moment_x_kNm: Optional[float] = None
+    service_moment_y_kNm: Optional[float] = None
 
     footing_length_mm: float = Field(..., gt=0)
     footing_width_mm: float = Field(..., gt=0)
     footing_depth_mm: float = Field(..., gt=0)
 
-    column_x_mm: float = Field(..., gt=0)
-    column_y_mm: float = Field(..., gt=0)
+    column_x_mm: float = Field(..., gt=0)     # diameter for a circular column
+    column_y_mm: float = Field(..., gt=0)     # ignored (= diameter) for a circular column
+    column_shape: Literal["rectangular", "circular"] = "rectangular"
+    # Column centre from the footing centre (+x along L, +y along B).
+    # Edge/corner columns on the page set these so the column is flush
+    # with the footing edge.
+    column_offset_x_mm: float = 0.0
+    column_offset_y_mm: float = 0.0
+    column_fixity: Literal["fixed", "pinned"] = "fixed"
 
     concrete_grade_fck: float = Field(..., gt=0)
     steel_grade_fyk: float = Field(..., gt=0)
@@ -63,11 +75,21 @@ class PadFoundationRequest(BaseModel):
 
     @model_validator(mode="after")
     def check_column_fits_footing(self):
+        if self.column_shape == "circular":
+            self.column_y_mm = self.column_x_mm
         if self.column_x_mm >= self.footing_length_mm or self.column_y_mm >= self.footing_width_mm:
             raise ValueError(
                 f"Column ({self.column_x_mm:.0f} x {self.column_y_mm:.0f} mm) does not fit inside "
                 f"the footing ({self.footing_length_mm:.0f} x {self.footing_width_mm:.0f} mm). "
                 f"The footing must be larger than the column on both sides."
+            )
+        # small tolerance so an edge column set flush on the page passes
+        if (abs(self.column_offset_x_mm) + self.column_x_mm / 2 > self.footing_length_mm / 2 + 0.5
+                or abs(self.column_offset_y_mm) + self.column_y_mm / 2 > self.footing_width_mm / 2 + 0.5):
+            raise ValueError(
+                f"Column offset ({self.column_offset_x_mm:.0f}, {self.column_offset_y_mm:.0f} mm) puts the "
+                f"column outside the footing. Max offset: {(self.footing_length_mm - self.column_x_mm) / 2:.0f} mm "
+                f"along L, {(self.footing_width_mm - self.column_y_mm) / 2:.0f} mm along B."
             )
         return self
 
@@ -124,6 +146,11 @@ class GeometryOut(BaseModel):
     d_eff_x_mm: float
     d_eff_y_mm: float
     cover_mm: float
+    # pad only; combined leaves these at their defaults
+    column_shape: str = "rectangular"
+    column_offset_x_mm: float = 0.0
+    column_offset_y_mm: float = 0.0
+    column_fixity: str = "fixed"
 
 
 class CornersOut(BaseModel):
@@ -166,6 +193,7 @@ class ShearDirectionOut(BaseModel):
     VEd_kN_per_m: float
     VRdc_kN_per_m: float
     status: str
+    rho_l: Optional[float] = None
 
 
 class OneWayShearOut(BaseModel):
@@ -175,8 +203,17 @@ class OneWayShearOut(BaseModel):
 
 class PunchingOut(BaseModel):
     vEd_MPa: float
-    vRdc_MPa: float
+    vRdc_MPa: float           # basic v_Rd,c; the check is against vRd_MPa
     status: str
+    # EC2 6.4.4(2) search, pad only (combined has its own CombinedPunchingOut)
+    applicable: Optional[bool] = None
+    a_mm: Optional[float] = None
+    u_m: Optional[float] = None
+    beta: Optional[float] = None
+    VEd_red_kN: Optional[float] = None
+    vRd_MPa: Optional[float] = None
+    v0_MPa: Optional[float] = None
+    vRdmax_MPa: Optional[float] = None
 
 
 class UtilisationOut(BaseModel):
@@ -198,7 +235,11 @@ class PadFoundationResponse(BaseModel):
     foundation_type: str = "pad"
     load_case: str
     geometry: GeometryOut
-    soil_pressure: SoilPressureOut
+    soil_pressure: SoilPressureOut        # SLS, incl. footing self-weight: bearing / uplift
+    soil_pressure_uls: SoilPressureOut    # ULS net pressure: structural design
+    sls_from_uls: bool
+    footing_weight_kN: float
+    sls_total_load_kN: float
     design_moments: DesignMomentsOut
     flexure: FlexureOut
     one_way_shear: OneWayShearOut

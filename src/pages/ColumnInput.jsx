@@ -201,7 +201,7 @@ export default function ColumnInput() {
       // custom_faces / n_bars_b_face / n_bars_h_face at the top level, and a
       // spread merge lets those stale keys beat the new defaults. Drop them
       // on the way in rather than bumping DRAFT_KEY, so the rest survives.
-      const { custom_faces, n_bars_b_face, n_bars_h_face, ...rest } = JSON.parse(saved);
+      const { custom_faces: _cf, n_bars_b_face: _bf, n_bars_h_face: _hf, ...rest } = JSON.parse(saved);
       // A storey ticked for a face split before the total came back holds a
       // b-face and an h-face and no total. Turn that into a total plus a
       // b-face count, so the storey opens as the cage the engineer entered.
@@ -254,12 +254,10 @@ export default function ColumnInput() {
   const STEPS = isAxial ? STEPS_AXIAL : STEPS_FULL;
   const stepName = (i) => STEPS[i];
 
-  // Switching to an axial column shortens the flow; clamp so the current
-  // index cannot point past the end and render nothing.
-  useEffect(() => {
-    setStep((cur) => Math.min(cur, STEPS.length - 1));
-    setMaxReached((m) => Math.min(m, STEPS.length - 1));
-  }, [STEPS.length]);
+  // STEPS_AXIAL is STEPS_FULL, so switching column type never changes the
+  // number of steps; the effect that clamped the step index on a length
+  // change could never fire and was removed. Restore a clamp here if the
+  // axial flow is ever shortened again.
   const isBiaxial = form.column_type === "biaxial";
   const isUniaxial = form.column_type === "uniaxial";
   const uniAx = form.uniaxial_axis === "y" ? "y" : "x";
@@ -895,7 +893,7 @@ function StepSlenderness({ form, set }) {
 
 /* ================= STEP 4 ================= */
 function StepFloors({ form, set, setFloor, setBeam, setLevel, setLevelFloor, setLevelBeam,
-                     levels, directLoad, isAxial }) {
+                     levels, directLoad }) {
   return (
     <div className="space-y-5">
       {directLoad ? (
@@ -963,14 +961,14 @@ function CrankZoneFields({ form, set }) {
       </p>
       <div className="grid grid-cols-2 gap-3">
         <Num label="Max crank slope, rise:run" value={form.crank_max_slope}
-          placeholder="1 / 6 \u2248 0.167" onChange={(v) => set({ crank_max_slope: v })} step="0.01" />
+          placeholder={"1 / 6 \u2248 0.167"} onChange={(v) => set({ crank_max_slope: v })} step="0.01" />
         <Num label="Assumed crank zone" unit="mm" value={form.crank_zone_mm}
           placeholder="300" onChange={(v) => set({ crank_zone_mm: v })} step="10" />
       </div>
       <Note>
         Leave both blank to use the defaults: a 1-in-6 slope over an assumed 300 mm
         above the lap. Change these only once an engineer has checked the actual
-        crank detail on this job and it allows something different \u2014 a wider
+        crank detail on this job and it allows something different — a wider
         zone or a shallower slope lets a bigger section step pass between two
         storeys; tightening either makes the check stricter.
       </Note>
@@ -1223,7 +1221,7 @@ function BeamBlock({ label, b, onChange, inherit }) {
 const form_masonry_hint = "step 1 masonry density";
 
 /* ================= STEP 6 ================= */
-function StepReview({ form, levels, layout, isAxial, isBiaxial, directLoad, useFinalMEd }) {
+function StepReview({ form, levels, layout, directLoad }) {
   const elLabel = EL_METHODS.find((m) => m.value === form.el_method)?.label;
   return (
     <div className="space-y-5">

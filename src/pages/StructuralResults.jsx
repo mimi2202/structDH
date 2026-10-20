@@ -1,12 +1,16 @@
 // src/pages/StructuralResults.jsx
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import DetailedReport from "../components/DetailedReport";
+import { exportElementToPdf } from "../utils/exportPdf";
+import { buildCoverHtml } from "../utils/reportCover";
+import { listDesigns, saveDesign, deleteDesign } from "../utils/savedDesigns";
+import { downloadCsv, objectRows } from "../utils/exportCsv";
 import { slabAPI } from "../services/api";
 import {
   FiHome, FiChevronRight, FiFilePlus, FiFolder, FiSave, FiMoreVertical,
   FiArrowLeft, FiArrowRight, FiCheck, FiDownload, FiFileText,
-  FiAlertTriangle, FiXCircle, FiShield, FiInfo,
+  FiAlertTriangle, FiXCircle, FiShield, FiInfo, FiTrash2, FiX,
 } from "react-icons/fi";
 
 /* ================================================================== */
@@ -21,6 +25,14 @@ const ACCENT = "text-[#0A2F44] dark:text-[#66a4c2]";
 const ROW_BORDER = "border-[#f1f5f9] dark:border-[#1f2937]";
 
 const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection", "Reinforcement Summary"];
+// what each tab holds, for the cover page of its PDF
+const TAB_NOTES = {
+  "Overview": "geometry, loads, design moments, reinforcement and the status of every check.",
+  "Flexural Design": "the bending design in full for each direction: K, lever arm, tension and minimum steel, bars provided (EC2 6.1).",
+  "Shear Design": "the shear check against the resistance without shear reinforcement (EC2 6.2.2).",
+  "Deflection": "the span/depth deflection check in full (EC2 7.4.2).",
+  "Reinforcement Summary": "the bars provided in each direction, with spacing and area.",
+};
 
 /* ================================================================== */
 /*  PURE HELPERS                                                      */
@@ -43,7 +55,6 @@ function deriveEC2({ summary, forces, reinf, shear, defl }) {
   const h = Number(summary.thickness) || 0;
   const Lx = Number(summary.span_lx) || 0;
   const Ly = Number(summary.span_ly) || 0;
-  const isTwoWay = /two/i.test(summary.slab_type || "") && Ly > 0;
   const spans = [Lx, Ly].filter(Boolean);
   const Lshort = (spans.length ? Math.min(...spans) : 0) * 1000;
 
@@ -109,6 +120,10 @@ const StructuralResults = () => {
   const navigate = useNavigate();
   const [tab, setTab] = useState("Overview");
   const [reportOpen, setReportOpen] = useState(false);
+  const sheetRef = useRef(null);
+  const [openList, setOpenList] = useState(null);     // saved designs shown by "Open", null = closed
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [toast, setToast] = useState("");
   const [liveResult, setLiveResult] = useState(null);   // overrides location.state after a re-run
   const [rerunning, setRerunning] = useState(false);
   const [rerunError, setRerunError] = useState("");
@@ -174,6 +189,53 @@ const StructuralResults = () => {
 
   const ctx = { summary, forces, reinf, defl, shear, compliance, cost, D, isPass };
 
+  const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+
+  // Save / Open: designs kept in this browser (utils/savedDesigns.js)
+  const saveCurrent = () => {
+    const name = `${summary.slab_type || "Slab"} ${[summary.span_lx, summary.span_ly].filter((v) => v != null).join(" × ")} m, h ${summary.thickness} mm`;
+    try {
+      saveDesign("slab", {
+        name, status: summary.status,
+        subtitle: [summary.concrete_grade, summary.steel_grade, summary.continuity].filter(Boolean).join(" · "),
+        designResult: rawData, formData: originalFormData || null,
+      });
+      flash(`Saved: ${name}`);
+    } catch (e) {
+      flash(e.message);
+    }
+  };
+  const openSaved = (d) => {
+    setOpenList(null);
+    setLiveResult(null);
+    setTab("Overview");
+    navigate(location.pathname, { replace: true, state: { designResult: d.designResult, formData: d.formData } });
+  };
+
+  // Export: the results and the calculation trace as a CSV for Excel
+  const exportResults = () => downloadCsv(`Slab-${summary.slab_type || "results"}`, [
+    { title: "Summary", rows: objectRows(summary) },
+    { title: "Design forces", rows: objectRows(forces) },
+    { title: "Reinforcement", rows: objectRows(reinf) },
+    { title: "Deflection", rows: objectRows(defl) },
+    { title: "Shear", rows: objectRows(shear) },
+    { title: "Checks", rows: compliance.length ? [["Check", "Ratio", "Limit", "Status"], ...compliance.map((c) => [c.check, c.ratio, c.limit, c.status])] : [] },
+    { title: "Warnings", rows: warnings.map((w) => [typeof w === "string" ? w : w.message || JSON.stringify(w)]) },
+  ], rawData.report);
+
+  // prints the tab on screen behind a cover page
+  const downloadPdf = () => exportElementToPdf(sheetRef.current, `Slab-${tab}`, buildCoverHtml({
+    element: /slab/i.test(summary.slab_type || "") ? summary.slab_type : `${summary.slab_type || ""} Slab`.trim(), section: tab, sectionNote: TAB_NOTES[tab],
+    description: `${summary.slab_type || "Reinforced concrete"} slab${summary.continuity ? ` (${summary.continuity})` : ""} designed to BS EN 1992-1-1 for bending, shear and deflection.`,
+    facts: [
+      ["Spans lx × ly", [summary.span_lx, summary.span_ly].filter((v) => v != null).join(" × ") + " m"],
+      ["Thickness / effective depth", `${summary.thickness} / ${summary.effective_depth} mm`],
+      ["Materials", [summary.concrete_grade, summary.steel_grade].filter(Boolean).join(", ")],
+      ["Utilisation", summary.utilization_ratio],
+    ],
+    status: summary.status, report: rawData.report,
+  }));
+
   return (
     <div className={`min-h-screen ${PAGE}`}>
       {/* top app bar */}
@@ -191,13 +253,29 @@ const StructuralResults = () => {
         </div>
         <div className="flex items-center gap-1">
           <TopBtn icon={FiFilePlus} label="New" onClick={() => goToInput()} />
-          <TopBtn icon={FiFolder} label="Open" />
-          <TopBtn icon={FiSave} label="Save" />
-          <button className={`ml-1 rounded-md p-1.5 ${TXT_SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}><FiMoreVertical size={16} /></button>
+          <TopBtn icon={FiFolder} label="Open" onClick={() => setOpenList(listDesigns("slab"))} />
+          <TopBtn icon={FiSave} label="Save" onClick={saveCurrent} />
+          <div className="relative">
+            <button onClick={() => setMenuOpen((o) => !o)} aria-label="More actions" className={`ml-1 rounded-md p-1.5 ${TXT_SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}><FiMoreVertical size={16} /></button>
+            {menuOpen && (
+              <div className={`absolute right-0 z-40 mt-1 w-52 ${CARD} py-1`} onMouseLeave={() => setMenuOpen(false)}>
+                {[
+                  ["Open saved design", () => setOpenList(listDesigns("slab"))],
+                  ["Save design", saveCurrent],
+                  ["Detailed report", () => setReportOpen(true)],
+                  ["Download report (PDF)", downloadPdf],
+                  ["Export results (CSV)", exportResults],
+                ].map(([label, fn]) => (
+                  <button key={label} onClick={() => { setMenuOpen(false); fn(); }}
+                    className={`block w-full px-3 py-2 text-left text-[13px] ${TXT_MAIN} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}>{label}</button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1400px] p-5">
+      <main ref={sheetRef} className="mx-auto max-w-[1400px] p-5">
         {/* page header */}
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -206,8 +284,8 @@ const StructuralResults = () => {
           </div>
           <div className="flex gap-2">
             <button onClick={() => setReportOpen(true)} className={`flex items-center gap-1.5 rounded-lg border border-[#e2e8f0] dark:border-[#1f2937] bg-white dark:bg-[#0f172a] px-3 py-1.5 text-[13px] font-medium ${TXT_MAIN} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}><FiFileText size={15} /> Detailed Report</button>
-            <button className="flex items-center gap-1.5 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[#082636] transition-colors">
-              <FiDownload size={15} /> Export Excel
+            <button onClick={downloadPdf} className="flex items-center gap-1.5 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[#082636] transition-colors">
+              <FiDownload size={15} /> Download Report
             </button>
           </div>
         </div>
@@ -263,11 +341,48 @@ const StructuralResults = () => {
             <FiArrowLeft size={15} /> Back to Input
           </button>
           <div className="flex gap-2">
-            <button className={`rounded-lg border border-[#e2e8f0] dark:border-[#1f2937] bg-white dark:bg-[#0f172a] px-4 py-2 text-[13px] font-medium ${TXT_MAIN} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}>Save Results</button>
-            <button className="flex items-center gap-1.5 rounded-lg bg-[#0A2F44] px-4 py-2 text-[13px] font-medium text-white hover:bg-[#082636]">Export Results <FiArrowRight size={15} /></button>
+            <button onClick={saveCurrent} className={`rounded-lg border border-[#e2e8f0] dark:border-[#1f2937] bg-white dark:bg-[#0f172a] px-4 py-2 text-[13px] font-medium ${TXT_MAIN} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}>Save Results</button>
+            <button onClick={exportResults} title="CSV file: opens in Excel" className="flex items-center gap-1.5 rounded-lg bg-[#0A2F44] px-4 py-2 text-[13px] font-medium text-white hover:bg-[#082636]">Export Results <FiArrowRight size={15} /></button>
           </div>
         </div>
       </main>
+
+      {toast && (
+        <div role="status" className="fixed bottom-4 left-1/2 z-[70] -translate-x-1/2 rounded-lg bg-[#0A2F44] px-4 py-2 text-[13px] text-white shadow-lg">
+          {toast}
+        </div>
+      )}
+
+      {openList && (
+        <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 p-4" onClick={() => setOpenList(null)}>
+          <div className={`${CARD} mt-16 w-full max-w-lg`} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-[#e2e8f0] px-4 py-3 dark:border-[#1f2937]">
+              <h3 className={`text-sm font-bold ${TXT_MAIN}`}>Saved slab designs</h3>
+              <button onClick={() => setOpenList(null)} aria-label="Close" className={TXT_SUB}><FiX size={16} /></button>
+            </div>
+            {openList.length === 0 ? (
+              <p className={`px-4 py-6 text-center text-[13px] ${TXT_SUB}`}>No saved slab designs in this browser yet. Use Save on a result to keep it.</p>
+            ) : (
+              <ul className="max-h-[60vh] divide-y divide-[#e2e8f0] overflow-y-auto dark:divide-[#1f2937]">
+                {openList.map((d) => (
+                  <li key={d.id} className="flex items-center gap-3 px-4 py-3">
+                    <button onClick={() => openSaved(d)} className="min-w-0 flex-1 text-left">
+                      <div className={`truncate text-[13px] font-semibold ${TXT_MAIN}`}>{d.name}</div>
+                      <div className={`truncate text-[11px] ${TXT_SUB}`}>
+                        {new Date(d.saved_at).toLocaleString()} · {d.subtitle} ·{" "}
+                        <span className={d.status === "PASS" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>{d.status}</span>
+                      </div>
+                    </button>
+                    <button onClick={() => { deleteDesign("slab", d.id); setOpenList(listDesigns("slab")); }}
+                      aria-label={`Delete ${d.name}`} className={`rounded-md p-1.5 ${TXT_SUB} hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20`}><FiTrash2 size={14} /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className={`border-t border-[#e2e8f0] px-4 py-2 text-[11px] ${TXT_SUB} dark:border-[#1f2937]`}>Designs are kept in this browser only (up to 20).</p>
+          </div>
+        </div>
+      )}
 
       {rerunError && (
         <div className="fixed bottom-4 right-4 z-[70] rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-[13px] text-red-700 shadow-lg dark:border-red-700 dark:bg-red-900/40 dark:text-red-300">
@@ -322,7 +437,7 @@ function OverviewTab({ ctx }) {
 }
 
 function FlexuralTab({ ctx }) {
-  const { summary, forces, reinf, D } = ctx;
+  const { summary, forces, D } = ctx;
   const rows = [
     { loc: "Midspan — Sagging", dir: "Both Directions", layer: "Bottom", r: D.sagging, prov: D.bottomAs },
     { loc: "Support — Hogging", dir: "Both Directions", layer: "Top", r: D.hogging, prov: D.topAs },
@@ -772,14 +887,15 @@ function Gauge({ label, value = 0 }) {
         <span className={`text-[11px] ${TXT_SUB}`}>{label}</span>
         <span className={`text-[11px] font-bold ${TXT_MAIN}`}>{f(value)}</span>
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#e2e8f0] dark:bg-[#1f2937]">
-        <div className={`h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} />
+      <div className="pdf-keep-color pdf-bar-track h-1.5 w-full overflow-hidden rounded-full bg-[#e2e8f0] dark:bg-[#1f2937]">
+        <div className={`pdf-keep-color h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
 }
 
-function TopBtn({ icon: Icon, label, onClick }) {
+function TopBtn({ icon, label, onClick }) {
+  const Icon = icon;
   return (
     <button onClick={onClick} className={`hidden sm:flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium ${TXT_SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}>
       <Icon size={15} /> {label}
@@ -787,7 +903,8 @@ function TopBtn({ icon: Icon, label, onClick }) {
   );
 }
 
-function OutlineBtn({ icon: Icon, label }) {
+function OutlineBtn({ icon, label }) {
+  const Icon = icon;
   return (
     <button className={`flex items-center gap-1.5 rounded-lg border border-[#e2e8f0] dark:border-[#1f2937] bg-white dark:bg-[#0f172a] px-3 py-1.5 text-[13px] font-medium ${TXT_MAIN} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}>
       <Icon size={15} /> {label}
