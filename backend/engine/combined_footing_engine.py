@@ -34,11 +34,21 @@ method was incomplete or unconservative:
     used the ULS loads and no self-weight). Structural design stays on
     the ULS net pressure.
   - fctm from EC2 Table 3.1 (was 2.6 / 2.9).
+
+Structville textbook 8.5.4 (added 2026-10-24):
+  - Soil/surcharge on the footing (gamma_soil x h_soil) in the SLS bearing
+    load; no service loads and an sls_factor -> SLS = ULS / factor (1.36).
+  - size_combined_footing(): footing centroid on the SLS load resultant
+    (each projection + distance to the resultant = L/2, so the heavier
+    column gets the longer overhang; the entered left projection is the
+    shorter overhang), B from A_req = N_sls / q_net rounded up to 100 mm
+    and widened until the SLS pressure passes, trial depth +50 mm until
+    all checks pass.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Dict, List, Optional, Tuple
 
 
@@ -95,6 +105,12 @@ class CombinedPadInput:
     P1_sls_kN: Optional[float] = None
     P2_sls_kN: Optional[float] = None
     unit_weight_concrete: float = 25.0
+
+    # Structville 8.5.4: soil/surcharge on the footing (bearing only) and the
+    # ULS/SLS factor used when no service loads are given (None -> ULS used)
+    soil_unit_weight: float = 18.0
+    soil_depth_above_mm: float = 0.0
+    sls_factor: Optional[float] = None
 
 
 @dataclass
@@ -227,6 +243,7 @@ class CombinedFootingResult:
     punching: PunchingResult
 
     overall_status: str
+    soil_weight_kN: float = 0.0
 
 
 def _classify_load_case(d: CombinedPadInput) -> str:
@@ -288,17 +305,22 @@ def _bearing_pressure_biaxial(d: CombinedPadInput, total_load, Mx_total, My_tota
 def _sls_loads(d: CombinedPadInput, x1, x2, centre_x):
     """SLS loads on the soil for the bearing check: service column loads (ULS
     if not given) plus the footing self-weight, which acts at the centre.
-    Service moments = ULS moments x P_sls/P_uls of the same column."""
+    Service moments = ULS moments x P_sls/P_uls of the same column. Soil on
+    the footing also acts at the centre; a column with no service load
+    takes ULS / sls_factor (ULS if no factor)."""
     sls_from_uls = d.P1_sls_kN is None or d.P2_sls_kN is None
-    P1s = d.P1_kN if d.P1_sls_kN is None else d.P1_sls_kN
-    P2s = d.P2_kN if d.P2_sls_kN is None else d.P2_sls_kN
+    f = d.sls_factor or 1.0
+    P1s = d.P1_kN / f if d.P1_sls_kN is None else d.P1_sls_kN
+    P2s = d.P2_kN / f if d.P2_sls_kN is None else d.P2_sls_kN
     r1 = P1s / d.P1_kN if d.P1_kN else 1.0
     r2 = P2s / d.P2_kN if d.P2_kN else 1.0
     W_f = d.footing_length_m * d.footing_width_m * d.footing_depth_mm / 1000 * d.unit_weight_concrete
-    N = P1s + P2s + W_f
+    A_cols = 2 * d.column_x_mm * d.column_y_mm / 1e6
+    W_s = max(d.footing_length_m * d.footing_width_m - A_cols, 0) * d.soil_depth_above_mm / 1000 * d.soil_unit_weight
+    N = P1s + P2s + W_f + W_s
     My = P1s * (x1 - centre_x) + P2s * (x2 - centre_x) + r1 * d.P1_My_kNm + r2 * d.P2_My_kNm
     Mx = r1 * d.P1_Mx_kNm + r2 * d.P2_Mx_kNm
-    return sls_from_uls, W_f, N, My, Mx, (My / N if N else 0.0), (Mx / N if N else 0.0)
+    return sls_from_uls, W_f, W_s, N, My, Mx, (My / N if N else 0.0), (Mx / N if N else 0.0)
 
 
 def _footing_projections(d: CombinedPadInput, x1, x2):
@@ -517,7 +539,7 @@ def design_combined_footing(d: CombinedPadInput) -> CombinedFootingResult:
     area, q0, qmax, qmin, corners, _, _ = _bearing_pressure_biaxial(
         d, total_load, Mx_total, My_total, ex, ey)
     # SLS gross pressure (service loads + footing self-weight) for bearing / uplift.
-    sls_from_uls, W_f, N_s, My_s, Mx_s, ex_s, ey_s = _sls_loads(d, x1, x2, centre_x)
+    sls_from_uls, W_f, W_s, N_s, My_s, Mx_s, ex_s, ey_s = _sls_loads(d, x1, x2, centre_x)
     _, q0_s, qmax_s, qmin_s, corners_s, bearing_status, uplift_status = _bearing_pressure_biaxial(
         d, N_s, Mx_s, My_s, ex_s, ey_s)
     left_proj, spacing, right_proj = _footing_projections(d, x1, x2)
@@ -561,5 +583,52 @@ def design_combined_footing(d: CombinedPadInput) -> CombinedFootingResult:
         M_end_kNm=an["M_end"],
         d_long_mm=d_long, d_trans_mm=d_trans,
         long_flex=long_flex, long_top_flex=long_top_flex, trans_flex=trans_flex, M_trans_kNm=M_trans, projection_y_m=projection_y,
-        shear=shear, punching=punching, overall_status=overall,
+        shear=shear, punching=punching, overall_status=overall, soil_weight_kN=W_s,
     )
+
+def size_combined_footing(d: CombinedPadInput, max_depth_mm: float = 2000,
+                          extra_ok=None):
+    """Combined footing sizing, Structville 8.5.4: L so the footing centroid
+    sits on the SLS column-load resultant, B from the bearing pressure, depth
+    from the entered trial depth. d.left_projection_m is the shorter
+    overhang. Returns (sized input, result, steps)."""
+    f = d.sls_factor or 1.0
+    P1s = d.P1_kN / f if d.P1_sls_kN is None else d.P1_sls_kN
+    P2s = d.P2_kN / f if d.P2_sls_kN is None else d.P2_sls_kN
+    r1, r2 = P1s / d.P1_kN, P2s / d.P2_kN
+    s = d.column_spacing_m
+    # resultant of the service column loads from column 1 (column My shift it)
+    x_bar = (P2s * s + r1 * d.P1_My_kNm + r2 * d.P2_My_kNm) / (P1s + P2s)
+    p_min = max(d.left_projection_m, d.column_x_mm / 2000)
+    # p1 + x_bar = L/2 = p2 + (s - x_bar); round the longer overhang to 10 mm
+    extra = math.ceil(abs(2 * x_bar - s) * 100 - 1e-9) / 100
+    p1, p2 = (p_min, p_min + extra) if 2 * x_bar >= s else (p_min + extra, p_min)
+    p1, p2 = round(p1, 3), round(p2, 3)
+    L = round(p1 + s + p2, 3)
+    h = d.footing_depth_mm
+    steps = []
+    while True:
+        w = d.unit_weight_concrete * h / 1000 + d.soil_unit_weight * d.soil_depth_above_mm / 1000
+        q_net = d.allowable_bearing_kN_m2 - w
+        if q_net <= 0:
+            raise ValueError(f"Allowable bearing {d.allowable_bearing_kN_m2:.0f} kN/m2 is used up by the footing "
+                             f"and soil weight ({w:.1f} kN/m2) at h = {h:.0f} mm: no footing size works.")
+        A_req = (P1s + P2s) / q_net
+        B = math.ceil(max(A_req / L, d.column_y_mm / 1000 + 0.2) * 10 - 1e-9) / 10
+        B_first = B
+        while True:
+            trial = replace(d, footing_length_m=L, footing_width_m=round(B, 1),
+                            left_projection_m=p1, footing_depth_mm=h)
+            res = design_combined_footing(trial)
+            if res.bearing_status == "OK" and res.uplift_status == "OK":
+                break
+            B = round(B + 0.1, 1)
+        # extra_ok: further checks that deepen the footing (detailing)
+        ok = res.overall_status == "PASS" and (extra_ok is None or extra_ok(trial, res))
+        steps.append({"h_mm": h, "w_kN_m2": w, "q_net": q_net, "N_sls": P1s + P2s, "A_req_m2": A_req,
+                      "x_bar_m": x_bar, "p1_m": p1, "p2_m": p2, "L_m": L,
+                      "first_B_m": B_first, "B_m": trial.footing_width_m,
+                      "structural_ok": ok})
+        if ok or h + 50 > max_depth_mm:
+            return trial, res, steps
+        h += 50

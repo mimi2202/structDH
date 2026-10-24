@@ -62,14 +62,20 @@ const DEFAULTS = {
   footing_shape: "Square", footing_length_mm: "2000", footing_width_mm: "2000",
   footing_depth_mm: "500", pedestal_height_mm: "0", pedestal_size_mm: "0",
   depth_below_ground_mm: "1200",
+  // size L x B from the bearing pressure and deepen h (trial depth) until all checks pass
+  auto_size: false,
   // soil & ground (display-only except allowable bearing)
   soil_type: "Medium Dense Sand", allowable_bearing_kN_m2: "200",
   unit_weight_soil: "18.0", ground_level_m: "0.00", water_table_m: "5.00",
   // materials
   concrete_grade_fck: "C25/30", steel_grade_fyk: "B500",
   cover_mm: "50", bar_dia_mm: "16",
+  // detailing / bar schedule (Structville 9.10, 10.2)
+  n_members: "1", starter_bar_count: "4", starter_bar_dia_mm: "16", starter_projection_mm: "",
   // loads — service + ultimate (engine uses ultimate)
   service_vertical_kN: "500", service_mx: "10", service_my: "5",
+  // ULS/SLS ratio used when the service row is blank (Structville: 1.36 for residential)
+  sls_factor: "1.36",
   ultimate_vertical_kN: "750", ultimate_mx: "15", ultimate_my: "7.5",
   // design & checks (display-only)
   design_approach: "DA1 - Combination 1", analysis_method: "Rigid (Base Pressure)",
@@ -91,6 +97,14 @@ const DEFAULTS = {
   // SLS loads for the bearing check; blank -> the ULS load is used (conservative)
   p1_service_kN: "360", p2_service_kN: "250",
 };
+
+// Detailing / bar schedule fields, same for pad and combined.
+const detailingFields = (f) => ({
+  n_members: Math.max(parseInt(f.n_members, 10) || 1, 1),
+  starter_bar_count: Math.max(parseInt(f.starter_bar_count, 10) || 0, 0),
+  starter_bar_dia_mm: parseFloat(f.starter_bar_dia_mm) || 16,
+  starter_projection_mm: parseFloat(f.starter_projection_mm) > 0 ? parseFloat(f.starter_projection_mm) : null,
+});
 
 // Combined footing: the pad defaults (2.0 m long) cannot hold column 2 at
 // left projection + spacing, so lengthen the footing to project the same
@@ -195,6 +209,11 @@ export default function FoundationInput() {
           allowable_bearing_kN_m2: num(form.allowable_bearing_kN_m2),
           cover_mm: num(form.cover_mm),
           bar_dia_mm: num(form.bar_dia_mm),
+          sls_factor: num(form.sls_factor) >= 1 ? num(form.sls_factor) : null,
+          soil_unit_weight_kN_m3: num(form.unit_weight_soil) > 0 ? num(form.unit_weight_soil) : 18,
+          soil_depth_above_mm: Math.max((num(form.depth_below_ground_mm) || 0) - (num(form.footing_depth_mm) || 0), 0),
+          auto_size: !!form.auto_size,
+        ...detailingFields(form),
           design_basis: designBasisPayload(),
         });
         setBusy(false);
@@ -237,6 +256,13 @@ export default function FoundationInput() {
         service_axial_kN: num(form.service_vertical_kN) > 0 ? num(form.service_vertical_kN) : null,
         service_moment_x_kNm: num(form.service_vertical_kN) > 0 ? num(form.service_mx) || 0 : null,
         service_moment_y_kNm: num(form.service_vertical_kN) > 0 ? num(form.service_my) || 0 : null,
+        // Structville 8.5.1: SLS = ULS / factor when the service row is blank
+        sls_factor: num(form.sls_factor) >= 1 ? num(form.sls_factor) : null,
+        // soil on the footing = founding depth - footing thickness
+        soil_unit_weight_kN_m3: num(form.unit_weight_soil) > 0 ? num(form.unit_weight_soil) : 18,
+        soil_depth_above_mm: Math.max((num(form.depth_below_ground_mm) || 0) - (num(form.footing_depth_mm) || 0), 0),
+        auto_size: !!form.auto_size,
+        ...detailingFields(form),
         design_basis: designBasisPayload(),
         // pass-through display context (not used by engine calc)
         _meta: { project: form.project, location: form.location, soil_type: form.soil_type,
@@ -347,6 +373,14 @@ export default function FoundationInput() {
                 <Num label="Pedestal Height" unit="mm" value={form.pedestal_height_mm} onChange={(v) => set({ pedestal_height_mm: v })} />
                 <Num label="Depth Below Ground" unit="mm" value={form.depth_below_ground_mm} onChange={(v) => set({ depth_below_ground_mm: v })} />
               </div>
+              <label className="mt-3 flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={!!form.auto_size} onChange={(e) => set({ auto_size: e.target.checked })} className="h-4 w-4 accent-[#0A2F44]" /><span className={MAIN}>Size the footing for me</span></label>
+              <p className={`mt-1 text-xs ${SUB}`}>
+                {form.auto_size && isCombined
+                  ? "The footing is placed so its centre sits on the resultant of the column loads (uniform bearing): the left projection above is the shorter overhang, the other is worked out (the heavier column gets the longer one). Width comes from the bearing pressure, rounded up to 100 mm; the thickness is the trial depth, increased in 50 mm steps until all checks pass. Length and width entered here are ignored."
+                  : form.auto_size
+                  ? "Length × width come from the bearing pressure (A = N,sls / q,net, rounded up to 100 mm, keeping the length/width ratio above). The thickness above is the trial depth: it is increased in 50 mm steps until bending, shear and punching pass. Column must be at the footing centre."
+                  : "Depth below ground is to the underside of the footing; the soil above the footing is added to the bearing load."}
+              </p>
               {shapeFix(form) && (
                 <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3">
                   <FiAlertTriangle className="mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
@@ -378,6 +412,13 @@ export default function FoundationInput() {
                 <Num label="Cover" unit="mm" value={form.cover_mm} onChange={(v) => set({ cover_mm: v })} live />
                 <div><label className={LABEL}>Bar Dia (mm)</label><Dropdown value={form.bar_dia_mm} onChange={(v) => set({ bar_dia_mm: v })} options={BAR_DIAS} /></div>
               </div>
+              <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Num label="Identical footings (schedule)" value={form.n_members} onChange={(v) => set({ n_members: v })} />
+                <Num label={isCombined ? "Starter bars per column" : "Starter bars (No.)"} value={form.starter_bar_count} onChange={(v) => set({ starter_bar_count: v })} />
+                <div><label className={LABEL}>Starter Bar Dia (mm)</label><Dropdown value={form.starter_bar_dia_mm} onChange={(v) => set({ starter_bar_dia_mm: v })} options={BAR_DIAS} /></div>
+                <Num label="Starter projection above footing" unit="mm" value={form.starter_projection_mm} onChange={(v) => set({ starter_projection_mm: v })} />
+              </div>
+              <p className={`mt-2 text-xs ${SUB}`}>Used for the detailing and bar bending schedule only. Starter projection blank: soil depth above the footing plus the EC2 lap length. Starter bars 0: none scheduled.</p>
             </Card>
 
             {/* 5. Loads */}
@@ -413,7 +454,10 @@ export default function FoundationInput() {
                       </tbody>
                     </table>
                   </div>
-                  <p className={`mt-2 text-xs ${SUB}`}>Service loads (plus the footing self-weight) are used for the bearing check; leave blank to use the ULS load (conservative). Moments are ULS; for bearing they are scaled by each column's SLS/ULS ratio. The structural design uses the ULS loads.</p>
+                  <div className="mt-3 max-w-xs">
+                    <Num label="ULS / SLS factor (service blank)" value={form.sls_factor} onChange={(v) => set({ sls_factor: v })} />
+                  </div>
+                  <p className={`mt-2 text-xs ${SUB}`}>Service loads (plus the footing self-weight and the soil above it) are used for the bearing check; leave blank to use ULS ÷ factor (blank factor: the ULS load, conservative). Moments are ULS; for bearing they are scaled by each column's SLS/ULS ratio. The structural design uses the ULS loads.</p>
                 </>
               ) : (
                 <>
@@ -443,7 +487,10 @@ export default function FoundationInput() {
                       </tbody>
                     </table>
                   </div>
-                  <p className={`mt-2 text-xs ${SUB}`}>Bearing is checked on the Service (SLS) row plus the footing self-weight, because the allowable bearing pressure is a working (service) value. Leave the service vertical load blank to use the ULS row (conservative). Bending, shear and punching are designed on the Ultimate (ULS) row.</p>
+                  <div className="mt-3 max-w-xs">
+                    <Num label="ULS / SLS factor (service row blank)" value={form.sls_factor} onChange={(v) => set({ sls_factor: v })} />
+                  </div>
+                  <p className={`mt-2 text-xs ${SUB}`}>Bearing is checked on the Service (SLS) row plus the footing self-weight and the soil above it, because the allowable bearing pressure is a working (service) value. Leave the service vertical load blank to use ULS ÷ factor (1.36 is typical for residential buildings); leave the factor blank too to use the ULS row (conservative). Bending, shear and punching are designed on the Ultimate (ULS) row.</p>
                 </>
               )}
             </Card>

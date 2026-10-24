@@ -1,5 +1,5 @@
 # backend/models/foundation_schemas.py
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -45,6 +45,22 @@ class PadFoundationRequest(BaseModel):
     service_axial_kN: Optional[float] = Field(None, gt=0)
     service_moment_x_kNm: Optional[float] = None
     service_moment_y_kNm: Optional[float] = None
+    # Structville 8.5.1: service axial blank and a factor given -> SLS = ULS /
+    # factor (1.36 for residential buildings); blank -> ULS loads used.
+    sls_factor: Optional[float] = Field(None, ge=1.0, le=2.0)
+    # Soil/surcharge on top of the footing, added to the bearing load.
+    soil_unit_weight_kN_m3: float = Field(18.0, gt=0)
+    soil_depth_above_mm: float = Field(0.0, ge=0)
+    # Size the plan from the bearing pressure and deepen the entered (trial)
+    # depth until all checks pass; the entered L/B ratio is kept.
+    auto_size: bool = False
+    # Detailing / bar schedule (Structville 9.10, 10.2): identical footings
+    # scheduled, starter bars per column (count 0 -> none), projection of
+    # the starters above the footing top (blank -> soil depth + lap l0).
+    n_members: int = Field(1, ge=1, le=500)
+    starter_bar_count: int = Field(4, ge=0, le=40)
+    starter_bar_dia_mm: float = Field(16, gt=0)
+    starter_projection_mm: Optional[float] = Field(None, gt=0)
 
     footing_length_mm: float = Field(..., gt=0)
     footing_width_mm: float = Field(..., gt=0)
@@ -91,6 +107,13 @@ class PadFoundationRequest(BaseModel):
                 f"column outside the footing. Max offset: {(self.footing_length_mm - self.column_x_mm) / 2:.0f} mm "
                 f"along L, {(self.footing_width_mm - self.column_y_mm) / 2:.0f} mm along B."
             )
+        return self
+
+    @model_validator(mode="after")
+    def check_auto_size_concentric(self):
+        if self.auto_size and (self.column_offset_x_mm or self.column_offset_y_mm):
+            raise ValueError("Automatic sizing is for a column at the footing centre. Set the column "
+                             "location to Interior, or enter the footing size yourself.")
         return self
 
     @model_validator(mode="after")
@@ -240,6 +263,9 @@ class PadFoundationResponse(BaseModel):
     sls_from_uls: bool
     footing_weight_kN: float
     sls_total_load_kN: float
+    soil_weight_kN: float = 0.0
+    auto_sized: bool = False
+    detailing: Optional[Dict[str, Any]] = None   # anchorage + bar schedule
     design_moments: DesignMomentsOut
     flexure: FlexureOut
     one_way_shear: OneWayShearOut
@@ -291,13 +317,28 @@ class CombinedFootingRequest(BaseModel):
     gamma_c: float = Field(1.5, gt=0)
     gamma_s: float = Field(1.15, gt=0)
     unit_weight_concrete: float = Field(25.0, gt=0)
+    # Structville 8.5.4, as for the pad: ULS/SLS factor for columns with no
+    # service load, soil on the footing, and sizing. With auto_size the
+    # footing is placed on the load resultant (left_projection_m = the
+    # shorter overhang) and the entered length/width are ignored.
+    sls_factor: Optional[float] = Field(None, ge=1.0, le=2.0)
+    soil_unit_weight_kN_m3: float = Field(18.0, gt=0)
+    soil_depth_above_mm: float = Field(0.0, ge=0)
+    auto_size: bool = False
+    # Detailing / bar schedule (Structville 9.10, 10.2): identical footings
+    # scheduled, starter bars per column (count 0 -> none), projection of
+    # the starters above the footing top (blank -> soil depth + lap l0).
+    n_members: int = Field(1, ge=1, le=500)
+    starter_bar_count: int = Field(4, ge=0, le=40)
+    starter_bar_dia_mm: float = Field(16, gt=0)
+    starter_projection_mm: Optional[float] = Field(None, gt=0)
 
     design_basis: FoundationDesignBasis = FoundationDesignBasis()
 
     @model_validator(mode="after")
     def check_columns_fit_on_footing(self):
         x2 = self.left_projection_m + self.column_spacing_m
-        if x2 > self.footing_length_m:
+        if not self.auto_size and x2 > self.footing_length_m:
             raise ValueError(
                 f"Column 2 sits at {x2:.3f} m from the left edge (left projection "
                 f"{self.left_projection_m:.3f} + spacing {self.column_spacing_m:.3f}), which is "
@@ -435,6 +476,13 @@ class CombinedFootingResponse(BaseModel):
     soil_pressure: SoilPressureOut        # SLS, incl. footing self-weight: bearing / uplift
     soil_pressure_uls: SoilPressureOut    # ULS net pressure: structural design
     sls_from_uls: bool
+    footing_weight_kN: float = 0.0
+    soil_weight_kN: float = 0.0
+    sls_total_load_kN: float = 0.0
+    auto_sized: bool = False
+    detailing: Optional[Dict[str, Any]] = None   # anchorage + bar schedule
+    left_projection_m: float = 0.0        # column 1 centre from the left edge
+    right_projection_m: float = 0.0       # column 2 centre from the right edge
     moments: CombinedMomentsOut
     longitudinal_bottom: LongitudinalOut  # sagging, under the columns
     longitudinal_top: LongitudinalOut     # hogging, between the columns

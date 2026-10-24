@@ -15,12 +15,13 @@ const ACCENT = "#0A2F44", ACCENT_D = "#66a4c2";
 
 // Overview, then one tab per check in depth. "Download PDF" prints the tab
 // on screen, behind a cover page.
-const PAD_TABS = ["Overview", "Bearing", "Flexural Design", "Shear & Punching"];
+const PAD_TABS = ["Overview", "Bearing", "Flexural Design", "Shear & Punching", "Detailing & Schedule"];
 const TAB_NOTES = {
   "Overview": "geometry, bearing summary and the status of every check.",
   "Bearing": "soil pressure under the footing from the service loads plus self-weight, checked against the allowable bearing pressure, with eccentricity and uplift.",
   "Flexural Design": "design moments at the column face and the bottom reinforcement in each direction.",
   "Shear & Punching": "one-way shear at d from the column face and punching shear around the column (EC2 6.2 and 6.4).",
+  "Detailing & Schedule": "anchorage of the bottom bars at the footing edge (EC2 9.8.2.2), bar callouts and the reinforcement bending/quantity schedule.",
 };
 
 function footingCover(r, meta, tab, element, facts) {
@@ -126,7 +127,7 @@ export default function FoundationResults() {
           <>
             {/* 1. adopted geometry + 2. design results */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Panel title="Foundation Geometry (Adopted)">
+              <Panel title={r.auto_sized ? "Foundation Geometry (Sized from bearing)" : "Foundation Geometry (Adopted)"}>
                 <div className="flex items-center gap-4">
                   <PlanSVG g={g} />
                   <div className="flex-1 space-y-1.5">
@@ -144,8 +145,8 @@ export default function FoundationResults() {
 
               <Panel title="Bearing (Service) & Design Pressure (Ultimate)">
                 {r.sls_total_load_kN != null && (
-                  <KV label={r.sls_from_uls ? "ULS load + self-weight" : "Service load + self-weight"}
-                    value={`${r.sls_total_load_kN} kN (W_f ${r.footing_weight_kN})`} />
+                  <KV label={r.sls_from_uls ? "ULS-derived load + footing + soil" : "Service load + footing + soil"}
+                    value={`${r.sls_total_load_kN} kN (W_f ${r.footing_weight_kN}, W_s ${r.soil_weight_kN ?? 0})`} />
                 )}
                 <KV label="Avg pressure q0 (SLS)" value={`${sp.q0} kN/m²`} />
                 <KV label="Max pressure qmax (SLS)" value={`${sp.qmax} kN/m²`} strong warn={!sp.bearing_ok} />
@@ -159,12 +160,13 @@ export default function FoundationResults() {
 
             {/* design summary chips */}
             <Panel title="Design Summary">
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 <Chip label="Bearing" pct={u.bearing_pct} ok={sp.bearing_ok} />
                 <Chip label="One-way shear" ok={sx.status === "OK" && sy.status === "OK"} />
                 <Chip label="Punching" pct={u.punching_pct} ok={pn.status === "OK"} />
                 <Chip label="Reinforcement" ok={fx.status === "OK" && fy.status === "OK"} />
                 <Chip label="Uplift" ok={sp.uplift_ok} />
+                {r.detailing && <Chip label="Detailing" ok={r.detailing.status === "OK"} />}
               </div>
             </Panel>
 
@@ -233,8 +235,10 @@ export default function FoundationResults() {
           </>
         )}
 
+        {tab === "Detailing & Schedule" && <DetailingTab det={r.detailing} report={r.report} />}
+
         <p className={`text-xs ${SUB} text-center pt-2`}>
-          Computed per EN 1992-1-1 (§6.2, §6.4, §9.8) & EN 1997-1. Bearing on service loads + self-weight; bending, shear and punching on ULS loads. Validate against a trusted tool before real design.
+          Computed per EN 1992-1-1 (§6.2, §6.4, §9.8) & EN 1997-1. Bearing on service loads + footing self-weight + soil above; bending, shear and punching on ULS loads. Validate against a trusted tool before real design.
         </p>
       </div>
 
@@ -371,8 +375,9 @@ function CombinedFootingResults({ r, meta, navigate, sheetRef, showReport, setSh
                 <KV label="Mx,total / My,total" value={`${r.moments.Mx_total_kNm} / ${r.moments.My_total_kNm} kNm`} />
               </Panel>
 
-              <Panel title="Geometry & Design Results">
+              <Panel title={r.auto_sized ? "Geometry (Sized on the load resultant) & Design Results" : "Geometry & Design Results"}>
                 <KV label="Footing" value={`${g.footing_length_mm} × ${g.footing_width_mm} mm`} />
+                {r.right_projection_m ? <KV label="Projection left / right (to column centre)" value={`${r.left_projection_m} / ${r.right_projection_m} m`} /> : null}
                 <KV label="Thickness" value={`${g.footing_depth_mm} mm`} />
                 <KV label="Effective depth, long. / trans." value={`${g.d_long_mm} / ${g.d_trans_mm} mm`} />
                 <KV label="Bearing qmax (SLS)" value={`${sp.qmax} kN/m²`} strong warn={!sp.bearing_ok} />
@@ -383,12 +388,13 @@ function CombinedFootingResults({ r, meta, navigate, sheetRef, showReport, setSh
             </div>
 
             <Panel title="Design Summary">
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 <Chip label="Bearing" pct={u.bearing_pct} ok={sp.bearing_ok} />
                 <Chip label="One-way shear" ok={sh.status === "OK"} />
                 <Chip label="Punching" pct={u.punching_pct} ok={pn.status === "OK"} />
                 <Chip label="Reinforcement" ok={lb.status === "OK" && lt.status === "OK" && tr.status === "OK"} />
                 <Chip label="Uplift" ok={sp.uplift_ok} />
+                {r.detailing && <Chip label="Detailing" ok={r.detailing.status === "OK"} />}
               </div>
             </Panel>
 
@@ -448,8 +454,10 @@ function CombinedFootingResults({ r, meta, navigate, sheetRef, showReport, setSh
           </>
         )}
 
+        {tab === "Detailing & Schedule" && <DetailingTab det={r.detailing} report={r.report} />}
+
         <p className={`text-xs ${SUB} text-center pt-2`}>
-          Computed per EN 1992-1-1 (§6.2, §6.4, §9.8) & EN 1997-1. Bearing on {r.sls_from_uls ? "ULS loads (no service loads entered)" : "SLS loads"} plus footing self-weight; structural design on ULS loads. Validate against a trusted tool before real design.
+          Computed per EN 1992-1-1 (§6.2, §6.4, §9.8) & EN 1997-1. Bearing on {r.sls_from_uls ? "ULS-derived loads (no service loads entered; see report)" : "SLS loads"} plus footing self-weight and soil above; structural design on ULS loads. Validate against a trusted tool before real design.
         </p>
       </div>
 
@@ -592,6 +600,91 @@ function Chip({ label, pct, ok }) {
       <span className={`text-[11px] text-center ${MAIN}`}>{label}</span>
       {pct != null && <span className={`text-[11px] font-semibold ${ok ? "text-green-700 dark:text-green-300" : "text-red-700 dark:text-red-300"}`}>{pct}%</span>}
     </div>
+  );
+}
+
+/* ---------- detailing & bar schedule (Structville 9.10, 10.2) ---------- */
+function BarShape({ code, dims }) {
+  // shape 21: U-bar (A leg, B straight, C leg); 11: L-bar (A vertical, B foot)
+  const stroke = "currentColor";
+  const lab = { fontSize: 9, fill: "#64748b" };
+  if (code === "21") {
+    return (
+      <svg width="150" height="40" viewBox="0 0 150 40" className="text-[#c0392b] dark:text-[#f87171]">
+        <polyline points="30,4 30,24 120,24 120,4" fill="none" stroke={stroke} strokeWidth="2.5" />
+        <text x="26" y="17" textAnchor="end" {...lab}>{dims.A}</text>
+        <text x="75" y="37" textAnchor="middle" {...lab}>{dims.B}</text>
+        <text x="124" y="17" {...lab}>{dims.C}</text>
+      </svg>
+    );
+  }
+  return (
+    <svg width="150" height="40" viewBox="0 0 150 40" className="text-[#c0392b] dark:text-[#f87171]">
+      <polyline points="34,4 34,24 94,24" fill="none" stroke={stroke} strokeWidth="2.5" />
+      <text x="30" y="17" textAnchor="end" {...lab}>{dims.A}</text>
+      <text x="64" y="37" textAnchor="middle" {...lab}>{dims.B}</text>
+    </svg>
+  );
+}
+
+function DetailingTab({ det, report }) {
+  if (!det) return <Panel title="Detailing & Schedule"><p className={`text-sm ${SUB}`}>Run the design again to get the detailing and bar schedule.</p></Panel>;
+  const dias = det.summary.by_diameter.map((e) => e.type_size);
+  return (
+    <>
+      <Panel title="Anchorage of Bottom Bars at the Footing Edge (EC2 9.8.2.2)">
+        <Table
+          head={["Bars", "x = h/2", "F_s", "σs", "l_bd straight", "x − cover", "Bent: α1 / α2", "Leg", "Status"]}
+          rows={det.anchorage.map((a) => [
+            a.label, `${a.x_mm} mm`, `${a.Fs_kN_m.toFixed(1)} kN/m`, `${a.sigma_s_MPa.toFixed(0)} MPa`,
+            `${a.lbd_straight_mm.toFixed(0)} mm`, `${a.available_straight_mm.toFixed(0)} mm`,
+            `${a.alpha1.toFixed(2)} / ${a.alpha2.toFixed(3)}`, `${a.leg_mm} mm`,
+            <Badge key={a.label} ok={a.status === "OK"}>{a.status}</Badge>,
+          ])}
+        />
+        <p className={`mt-2 text-xs ${SUB}`}>
+          F_s = R·z_e/z_i at x = h/2 from the edge (z_e to N_Ed at 0.15b inside the column face, z_i = 0.9d). Bars are U-bars with legs of at least 150 mm, longer where the bent-bar anchorage needs it (book 9.10).
+          Full-strength bent anchorage for reference: {det.anchorage.map((a) => `${a.lbd_full_mm.toFixed(0)} mm (${a.lbd_full_phi.toFixed(2)}φ)`).join(", ")}.
+        </p>
+      </Panel>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <Panel title="Bar Callouts (Drawing)">
+          {det.callouts.map((c, i) => <KV key={i} label={det.element === "pad" ? (i === 0 ? "Along L" : "Along B") : ["Bottom, longitudinal", "Top, longitudinal", "Bottom, transverse", "Top, transverse"][i]} value={c} strong />)}
+          <p className={`mt-2 text-xs ${SUB}`}>number - size - bar mark - spacing (mm), as on the book's footing drawings.</p>
+        </Panel>
+        <Panel title="Starter Bars">
+          {det.starters ? (
+            <>
+              <KV label="Bars" value={`${det.starters.per_column} Y${det.starters.phi_mm} per column × ${det.starters.columns}`} />
+              <KV label="Lap length l0 (EC2 8.7.3)" value={`${det.starters.lap_mm} mm`} />
+              <KV label="Projection above footing" value={`${det.starters.projection_mm} mm (${det.starters.projection_from})`} />
+              <KV label="Foot on bottom mat" value="300 mm" />
+            </>
+          ) : <p className={`text-sm ${SUB}`}>No starter bars scheduled (count set to 0).</p>}
+        </Panel>
+      </div>
+
+      <Panel title="Reinforcement Bending / Quantity Schedule">
+        <Table
+          head={["S/No", "Bar mark", "Type & size", "No. of bars", "No. of members", "Shape", "Shape code", "Length (m)", "Total length (m)", ...dias.map((d) => `${d} (kg)`)]}
+          rows={[
+            ...det.schedule.map((b, i) => [
+              i + 1, b.mark, b.type_size, b.n_bars, b.n_members, <BarShape key={b.mark} code={b.shape_code} dims={b.dims_mm} />,
+              b.shape_code, b.length_m.toFixed(3), b.total_length_m.toFixed(2),
+              ...dias.map((d) => (d === b.type_size ? b.mass_kg.toFixed(2) : "")),
+            ]),
+            ["", "", "", "", "", "", "", "", "TOTAL (kg)", ...det.summary.by_diameter.map((e) => e.mass_kg.toFixed(2))],
+            ["", "", "", "", "", "", "", "", "TOTAL (tonnes)", ...det.summary.by_diameter.map((e) => e.tonnes.toFixed(4))],
+            ["", "", "", "", "", "", "", "", "Pieces (12 m)", ...det.summary.by_diameter.map((e) => `${e.pieces_12m} pcs`)],
+          ]}
+        />
+        <p className={`mt-2 text-xs ${SUB}`}>
+          Cut length = sum of the shape dimensions (the book's convention; BS 8666 bend deductions not applied). Mass per metre 0.395 / 0.616 / 0.888 / 1.579 / 2.466 kg/m for Y8 / Y10 / Y12 / Y16 / Y20. Total {det.summary.total_mass_kg} kg.
+        </p>
+      </Panel>
+      <ReportSections report={report} match={/Detailing/i} heading="Detailing and bar schedule — calculation" />
+    </>
   );
 }
 

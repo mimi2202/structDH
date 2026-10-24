@@ -64,11 +64,25 @@ Column shape, position and fixity (added 2026-10-20):
     punching is reported not applicable (truncated perimeters of EC2
     Fig. 6.15 are not modelled).
   - Pinned base: the column moments are not passed to the footing.
+
+Structville textbook, Ch. 8 (added 2026-10-24):
+  - Design moment and one-way shear from the trapezoidal ULS net pressure
+    along each direction (mean across the width) instead of qmax over the
+    whole projection: M = q_f a^2/2 + (q_edge - q_f) a^2/3 at the column
+    face, V = (q_edge + q_d)/2 (a - d) at d from it; both overhangs checked.
+  - Soil/surcharge on the footing (gamma_soil x h_soil) added to the SLS
+    bearing load; no service load and an sls_factor given -> SLS = ULS /
+    factor (the book uses 1.36 for residential buildings).
+  - size_pad_foundation(): plan from A_req = N_sls / q_net, rounded up to
+    100 mm, and a trial depth deepened until the checks pass.
+  - Kept stricter than the book where the book is looser: one-way shear at
+    d uses v_Rd,c without the 2d/a enhancement (the book doubles it with
+    a = d); punching uses the EC2 6.4.4(2) search, not one perimeter at 2d.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, Optional
 
 from engine.combined_footing_engine import _fctm, _k_table_6_1
@@ -117,6 +131,12 @@ class PadFoundationInput:
     column_offset_x_mm: float = 0.0      # column centre from footing centre, +x
     column_offset_y_mm: float = 0.0
     column_pinned: bool = False          # pinned base: column moments not transferred
+
+    # Structville Ch. 8: soil/surcharge on top of the footing (bearing only)
+    # and the ULS/SLS conversion factor used when no service load is given.
+    soil_unit_weight: float = 18.0
+    soil_depth_above_mm: float = 0.0
+    sls_factor: Optional[float] = None   # None -> ULS loads used for bearing
 
 
 @dataclass
@@ -219,6 +239,11 @@ class PadFoundationResult:
     My_total_kNm: float = 0.0
     projection_x_min_mm: float = 0.0     # shorter overhang (offset column)
     projection_y_min_mm: float = 0.0
+    soil_weight_kN: float = 0.0          # soil/surcharge on the footing (SLS)
+    # ULS net pressure (mean across the width) at the footing edge, column
+    # face and d from the face, on the governing side of each direction
+    face_x: Dict[str, float] = field(default_factory=dict)
+    face_y: Dict[str, float] = field(default_factory=dict)
 
 
 def _load_case(moment_x: float, moment_y: float) -> str:
@@ -296,24 +321,48 @@ def _soil_pressure_biaxial(d: PadFoundationInput, L: float, B: float, area: floa
 
 def _sls_loads(d: PadFoundationInput, L: float, B: float):
     """Service loads on the soil: column service loads (ULS if not given)
-    plus the footing self-weight, which acts at the centre."""
+    plus the footing self-weight and the soil/surcharge on top of it, both
+    at the centre. No service load: ULS / sls_factor (Structville 8.5.1,
+    1.36 for residential buildings), or the ULS loads if no factor."""
     sls_from_uls = d.service_axial_kN is None
-    P = d.axial_load_kN if sls_from_uls else d.service_axial_kN
-    Mx = d.moment_x_kNm if sls_from_uls or d.service_moment_x_kNm is None else d.service_moment_x_kNm
-    My = d.moment_y_kNm if sls_from_uls or d.service_moment_y_kNm is None else d.service_moment_y_kNm
+    f = d.sls_factor if sls_from_uls and d.sls_factor else 1.0
+    P = d.axial_load_kN / f if sls_from_uls else d.service_axial_kN
+    Mx = d.moment_x_kNm / f if sls_from_uls or d.service_moment_x_kNm is None else d.service_moment_x_kNm
+    My = d.moment_y_kNm / f if sls_from_uls or d.service_moment_y_kNm is None else d.service_moment_y_kNm
     W_f = L * B * d.footing_depth_mm / 1000 * d.unit_weight_concrete
-    N = P + W_f
-    # the offset moment comes from the column load only (W_f acts at the centre)
+    cx, cy = _column_face(d)
+    W_s = max(L * B - cx * cy / 1e6, 0) * d.soil_depth_above_mm / 1000 * d.soil_unit_weight
+    N = P + W_f + W_s
+    # the offset moment comes from the column load only (W_f, W_s act at the centre)
     Mx, My = _footing_moments(d, P, Mx, My)
-    return sls_from_uls, W_f, N, Mx, My, (My / N if N else 0.0), (Mx / N if N else 0.0)
+    return sls_from_uls, W_f, W_s, N, Mx, My, (My / N if N else 0.0), (Mx / N if N else 0.0)
 
 
-def _design_moment(q_design: float, projection_x: float, projection_y: float):
-    ax_m = projection_x / 1000
-    ay_m = projection_y / 1000
-    Mx = q_design * ax_m ** 2 / 2
-    My = q_design * ay_m ** 2 / 2
-    return Mx, My
+def _face_actions(q0: float, e: float, span: float, offset: float, face: float, d_eff: float):
+    """Moment and shear per metre at the column face and at d from it, from
+    the trapezoidal ULS net pressure q(x) = q0 (1 + 12 e x / span^2) along
+    the direction (mean across the width), Structville 8.5.1:
+    M = q_f a^2/2 + (q_edge - q_f) a^2/3, V = (q_edge + q_d)/2 (a - d).
+    All lengths in m; both overhangs are checked, the larger M and the
+    larger V are used."""
+    q = lambda x: q0 * (1 + 12 * e * x / span ** 2)
+    best, V_max = None, 0.0
+    for s in (1, -1):
+        x_edge = s * span / 2
+        x_face = offset + s * face / 2
+        a = max(s * (x_edge - x_face), 0.0)
+        q_e, q_f = q(x_edge), q(x_face)
+        M = q_f * a ** 2 / 2 + (q_e - q_f) * a ** 2 / 3
+        ad = max(a - d_eff, 0.0)
+        q_d = q(x_edge - s * ad)
+        V = (q_e + q_d) / 2 * ad
+        if V > V_max:
+            V_max, V_side = V, {"a_V": a, "q_edge_V": q_e, "q_d": q_d}
+        if best is None or M > best["M"]:
+            best = {"M": M, "a": a, "q_edge": q_e, "q_face": q_f}
+    best["V"] = V_max
+    best.update(V_side if V_max > 0 else {"a_V": best["a"], "q_edge_V": best["q_edge"], "q_d": best["q_edge"]})
+    return best
 
 
 def _flexural_reinforcement(d: PadFoundationInput, M_kNm_per_m: float,
@@ -361,15 +410,9 @@ def _vrdc(d: PadFoundationInput, d_eff_mm: float, rho_l: float) -> float:
     return max(v, 0.035 * k ** 1.5 * math.sqrt(fck))
 
 
-def _one_way_shear(d: PadFoundationInput, q_design: float, projection_mm: float,
+def _one_way_shear(d: PadFoundationInput, VEd: float,
                    effective_depth_mm: float, direction: str, As_provided: float) -> ShearResult:
-    projection_m = projection_mm / 1000
-    d_m = effective_depth_mm / 1000
-
-    # EC2 6.2.1(8): section at d from the column face
-    shear_length = max(projection_m - d_m, 0)
-    VEd = q_design * shear_length
-
+    # VEd: per metre at the EC2 6.2.1(8) section, d from the column face
     rho_l = As_provided / (1000 * effective_depth_mm)
     VRdc = _vrdc(d, effective_depth_mm, rho_l) * 1000 * effective_depth_mm / 1000
 
@@ -448,15 +491,18 @@ def design_pad_foundation(d: PadFoundationInput) -> PadFoundationResult:
     q0, qmax, qmin, corners, _, _ = _soil_pressure_biaxial(d, L, B, area, ex, ey)
     Mx_t, My_t = _footing_moments(d, d.axial_load_kN, d.moment_x_kNm, d.moment_y_kNm)
     # SLS gross pressure (service loads + footing self-weight) for bearing / uplift.
-    sls_from_uls, W_f, N_s, Mx_s, My_s, ex_s, ey_s = _sls_loads(d, L, B)
+    sls_from_uls, W_f, W_s, N_s, Mx_s, My_s, ex_s, ey_s = _sls_loads(d, L, B)
     q0_s, qmax_s, qmin_s, corners_s, bearing_status, uplift_status = _soil_pressure_biaxial(
         d, L, B, area, ex_s, ey_s, N_s)
-    Mx, My = _design_moment(qmax, projection_x, projection_y)
+    cfx, cfy = _column_face(d)
+    face_x = _face_actions(q0, ex, L, d.column_offset_x_mm / 1000, cfx / 1000, d_eff_x / 1000)
+    face_y = _face_actions(q0, ey, B, d.column_offset_y_mm / 1000, cfy / 1000, d_eff_y / 1000)
+    Mx, My = face_x["M"], face_y["M"]
 
     flex_x = _flexural_reinforcement(d, Mx, d_eff_x, "x")
     flex_y = _flexural_reinforcement(d, My, d_eff_y, "y")
-    shear_x = _one_way_shear(d, qmax, projection_x, d_eff_x, "x", flex_x.As_provided)
-    shear_y = _one_way_shear(d, qmax, projection_y, d_eff_y, "y", flex_y.As_provided)
+    shear_x = _one_way_shear(d, face_x["V"], d_eff_x, "x", flex_x.As_provided)
+    shear_y = _one_way_shear(d, face_y["V"], d_eff_y, "y", flex_y.As_provided)
     # EC2 6.4.2(1)/6.4.4(1): d = (d_x + d_y)/2, rho_l = sqrt(rho_x rho_y);
     # relief from the ULS net pressure under the column centre (beta
     # carries the column moments)
@@ -489,4 +535,46 @@ def design_pad_foundation(d: PadFoundationInput) -> PadFoundationResult:
         column_face_x_mm=_column_face(d)[0], column_face_y_mm=_column_face(d)[1],
         Mx_total_kNm=Mx_t, My_total_kNm=My_t,
         projection_x_min_mm=a_min_x, projection_y_min_mm=a_min_y,
+        soil_weight_kN=W_s, face_x=face_x, face_y=face_y,
     )
+
+def size_pad_foundation(d: PadFoundationInput, max_depth_mm: float = 2000,
+                        extra_ok=None):
+    """Footing sizing, Structville 8.5.1 (prescriptive method, EC7 6.4(5)):
+    A_req = N_sls / (q_allow - gamma_c h - gamma_soil h_soil), plan rounded up
+    to 100 mm (entered L/B ratio kept; square stays square), then widened in
+    100 mm steps until the eccentric SLS pressure passes; the entered depth
+    is the trial depth and is deepened in 50 mm steps until flexure, shear
+    and punching pass. Returns (sized input, result, steps)."""
+    ratio = d.footing_length_mm / d.footing_width_mm
+    cx, cy = _column_face(d)
+    h = d.footing_depth_mm
+    steps = []
+    while True:
+        w = d.unit_weight_concrete * h / 1000 + d.soil_unit_weight * d.soil_depth_above_mm / 1000
+        q_net = d.allowable_bearing_kN_m2 - w
+        if q_net <= 0:
+            raise ValueError(f"Allowable bearing {d.allowable_bearing_kN_m2:.0f} kN/m2 is used up by the footing "
+                             f"and soil weight ({w:.1f} kN/m2) at h = {h:.0f} mm: no footing size works.")
+        f = d.sls_factor if d.service_axial_kN is None and d.sls_factor else 1.0
+        P = d.axial_load_kN / f if d.service_axial_kN is None else d.service_axial_kN
+        A_req = P / q_net
+        B_mm = max(math.ceil(math.sqrt(A_req / ratio) * 10 - 1e-9) * 100, cy + 200)
+        L_of = lambda b: max(math.ceil(ratio * b / 100 - 1e-9) * 100, cx + 200)
+        L_mm = L_of(B_mm)
+        first = (L_mm, B_mm)
+        while True:
+            trial = replace(d, footing_length_mm=L_mm, footing_width_mm=B_mm, footing_depth_mm=h)
+            res = design_pad_foundation(trial)
+            if res.bearing_status == "OK" and res.uplift_status == "OK":
+                break
+            B_mm += 100
+            L_mm = L_of(B_mm)
+        # extra_ok: further checks that deepen the footing (detailing)
+        ok = res.overall_status == "PASS" and (extra_ok is None or extra_ok(trial, res))
+        steps.append({"h_mm": h, "w_kN_m2": w, "q_net": q_net, "N_sls": P, "A_req_m2": A_req,
+                      "first_L_mm": first[0], "first_B_mm": first[1], "L_mm": L_mm, "B_mm": B_mm,
+                      "structural_ok": ok})
+        if ok or h + 50 > max_depth_mm:
+            return trial, res, steps
+        h += 50
