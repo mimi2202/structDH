@@ -67,6 +67,8 @@ const NewDesign = () => {
   const handleStartDesign = () => {
     if (selectedElement === 'slab') {
       navigate('/new-design/slab')
+    } else if (selectedElement === 'staircase') {
+      navigate('/staircase-design')
     } else {
       alert(
         `${selectedElement.charAt(0).toUpperCase() + selectedElement.slice(1)} design coming soon in Phase 3`

@@ -67,8 +67,8 @@ export default function FoundationResults() {
   const sx = r.one_way_shear.x, sy = r.one_way_shear.y, pn = r.punching, u = r.utilisation;
 
   return (
-    <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#111827] px-6 py-6">
-      <div ref={sheetRef} className="mx-auto max-w-6xl space-y-5">
+    <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#111827] px-4 sm:px-6 2xl:px-10 py-6">
+      <div ref={sheetRef} className="w-full space-y-5">
         {/* header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <button onClick={() => navigate("/foundation-input")} className={`flex items-center gap-2 text-sm ${SUB}`}>
@@ -161,7 +161,7 @@ export default function FoundationResults() {
             {/* design summary chips */}
             <Panel title="Design Summary">
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                <Chip label="Bearing" pct={u.bearing_pct} ok={sp.bearing_ok} />
+                <Chip label="Bearing (warning)" pct={u.bearing_pct} ok={sp.bearing_ok} />
                 <Chip label="One-way shear" ok={sx.status === "OK" && sy.status === "OK"} />
                 <Chip label="Punching" pct={u.punching_pct} ok={pn.status === "OK"} />
                 <Chip label="Reinforcement" ok={fx.status === "OK" && fy.status === "OK"} />
@@ -178,7 +178,7 @@ export default function FoundationResults() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <Panel title="Soil Pressure Distribution (Service)">
                 <SoilPressure3D corners={sp.corners} g={g} allow={r.materials.allowable_bearing_kN_m2} />
-                <p className={`mt-2 text-xs ${SUB}`}>qmax {sp.qmax} / qmin {sp.qmin} kN/m². {sp.bearing_ok ? "Within allowable." : "Exceeds allowable bearing."}</p>
+                <p className={`mt-2 text-xs ${SUB}`}>qmax {sp.qmax} / qmin {sp.qmin} kN/m². {sp.bearing_ok ? "Within allowable." : "Exceeds allowable bearing (warning only: not counted in the overall result)."}</p>
               </Panel>
 
               <Panel title="Plan">
@@ -309,8 +309,8 @@ function CombinedFootingResults({ r, meta, navigate, sheetRef, showReport, setSh
   const uls = r.soil_pressure_uls;
 
   return (
-    <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#111827] px-6 py-6">
-      <div ref={sheetRef} className="mx-auto max-w-6xl space-y-5">
+    <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#111827] px-4 sm:px-6 2xl:px-10 py-6">
+      <div ref={sheetRef} className="w-full space-y-5">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <button onClick={() => navigate("/foundation-input")} className={`flex items-center gap-2 text-sm ${SUB}`}>
             <FiArrowLeft size={16} /> Back to Input
@@ -389,7 +389,7 @@ function CombinedFootingResults({ r, meta, navigate, sheetRef, showReport, setSh
 
             <Panel title="Design Summary">
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                <Chip label="Bearing" pct={u.bearing_pct} ok={sp.bearing_ok} />
+                <Chip label="Bearing (warning)" pct={u.bearing_pct} ok={sp.bearing_ok} />
                 <Chip label="One-way shear" ok={sh.status === "OK"} />
                 <Chip label="Punching" pct={u.punching_pct} ok={pn.status === "OK"} />
                 <Chip label="Reinforcement" ok={lb.status === "OK" && lt.status === "OK" && tr.status === "OK"} />
@@ -405,7 +405,7 @@ function CombinedFootingResults({ r, meta, navigate, sheetRef, showReport, setSh
           <>
             <Panel title="Soil Pressure Distribution (SLS, incl. self-weight)">
               <SoilPressure3D corners={sp.corners} g={g} allow={r.materials.allowable_bearing_kN_m2} />
-              <p className={`mt-2 text-xs ${SUB}`}>qmax {sp.qmax} / qmin {sp.qmin} kN/m². {sp.bearing_ok ? "Within allowable." : "Exceeds allowable bearing."}</p>
+              <p className={`mt-2 text-xs ${SUB}`}>qmax {sp.qmax} / qmin {sp.qmin} kN/m². {sp.bearing_ok ? "Within allowable." : "Exceeds allowable bearing (warning only: not counted in the overall result)."}</p>
             </Panel>
 
             <ReportSections report={r.report} match={/Load Case|Resultant|Total Moments|Bearing|Projections/i} heading="Loads and bearing — calculation" />

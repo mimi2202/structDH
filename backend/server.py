@@ -8,6 +8,7 @@ import os
 import uvicorn
 from routers import column
 from routers import foundation
+from routers import staircase
   
 app = FastAPI(
     title="StructAI Design Engine",
@@ -32,6 +33,7 @@ app.include_router(continuous_beam.router, prefix="/api/continuous-beam")
 app.include_router(continuous_slab.router, prefix="/api/continuous-slab")
 app.include_router(column.router)
 app.include_router(foundation.router, prefix="/api/foundation")
+app.include_router(staircase.router, prefix="/api/staircase")
 
 @app.get("/")
 async def root():

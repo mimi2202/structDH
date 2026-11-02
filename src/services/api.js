@@ -46,6 +46,7 @@ const ENDPOINTS = {
   continuousSlab: "/api/continuous-slab/design/sync",
   padFoundation: "/api/foundation/pad/design/sync",
   combinedFoundation: "/api/foundation/combined/design/sync",
+  staircase: "/api/staircase/design/sync",
 };
 
 export const slabAPI = {
@@ -357,6 +358,24 @@ export const foundationAPI = {
 
   designCombined: async (payload) => {
     const res = await fetch(`${API_BASE}${ENDPOINTS.combinedFoundation}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(extractErrorMessage(err, "Design failed."));
+    }
+    return res.json();
+  },
+};
+
+// Staircase (Structville 5.4): flight + landing per metre width. The payload
+// carries the engine fields as-is (mm, kN/m2, N/mm2); blank spacings are sent
+// as null so the engine picks the bars.
+export const staircaseAPI = {
+  design: async (payload) => {
+    const res = await fetch(`${API_BASE}${ENDPOINTS.staircase}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

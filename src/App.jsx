@@ -39,6 +39,8 @@ import ColumnInput from './pages/ColumnInput';
 import ColumnResults from './pages/ColumnResults';
 import FoundationInput from './pages/FoundationInput';
 import FoundationResults from './pages/FoundationResults';
+import StaircaseInput from './pages/StaircaseInput';
+import StaircaseResults from './pages/StaircaseResults';
 
 function App() {
   return (
@@ -251,6 +253,20 @@ function App() {
                       (kept, unused) were written against an older 3-column API and always got a 422. */}
                   <Route path="/combined-input" element={<Navigate to="/foundation-input?type=combined" replace />} />
                   <Route path="/combined-results" element={<Navigate to="/foundation-input?type=combined" replace />} />
+                  <Route path="/staircase-design" element={
+                    <ProtectedRoute>
+                      <MainLayout currentModule="staircase" breadcrumb="Staircase Design > Input">
+                        <StaircaseInput />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/staircase-results" element={
+                    <ProtectedRoute>
+                      <MainLayout currentModule="staircase" breadcrumb="Staircase Design > Results">
+                        <StaircaseResults />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  } />
 
                     <Route path="/workspace/:workspaceId/projects/:projectId/results" element={<ResultsDashboard />} />
 

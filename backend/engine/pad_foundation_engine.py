@@ -516,7 +516,9 @@ def design_pad_foundation(d: PadFoundationInput) -> PadFoundationResult:
     punching = _punching_shear(d, q_col, (d_eff_x + d_eff_y) / 2, math.sqrt(rho_x * rho_y),
                                a_min_x, a_min_y)
 
-    checks = [bearing_status, uplift_status, flex_x.status, flex_y.status,
+    # Bearing is a warning only (user decision 2026-11-02): still computed and
+    # reported, and auto-sizing still sizes for it, but not in the overall.
+    checks = [uplift_status, flex_x.status, flex_y.status,
              shear_x.status, shear_y.status, punching.status]
     overall = "PASS" if all(c == "OK" for c in checks) else "FAIL"
 

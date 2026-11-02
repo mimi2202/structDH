@@ -563,7 +563,9 @@ def design_combined_footing(d: CombinedPadInput) -> CombinedFootingResult:
     ex_ok = abs(ex_s) <= d.footing_length_m / 6
     ey_ok = abs(ey_s) <= d.footing_width_m / 6
 
-    checks = [bearing_status, uplift_status, long_flex.status, long_top_flex.status, trans_flex.status,
+    # Bearing is a warning only (user decision 2026-11-02): still computed and
+    # reported, and auto-sizing still sizes for it, but not in the overall.
+    checks = [uplift_status, long_flex.status, long_top_flex.status, trans_flex.status,
               shear.status, punching.status]
     overall = "PASS" if all(c == "OK" for c in checks) else "FAIL"
 

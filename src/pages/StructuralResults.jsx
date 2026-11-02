@@ -275,7 +275,7 @@ const StructuralResults = () => {
         </div>
       </header>
 
-      <main ref={sheetRef} className="mx-auto max-w-[1400px] p-5">
+      <main ref={sheetRef} className="w-full px-4 py-5 sm:px-5 2xl:px-10">
         {/* page header */}
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>

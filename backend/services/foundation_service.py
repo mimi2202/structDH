@@ -103,7 +103,8 @@ def calculate_pad_foundation(request: PadFoundationRequest) -> PadFoundationResp
     # Utilisation percentages. "shear" is the governing (worse) of the two
     # one-way shear directions, matching the single "One-way shear (max)"
     # figure the results page shows. "overall" is the worst of the three
-    # figures the page actually displays (bearing, shear, punching) --
+    # figures the page actually displays (shear, punching; bearing is a
+    # warning only and shown on its own) --
     # flexural status is shown separately as a pass/fail chip, not folded
     # into a percentage, so it is not part of this max.
     bearing_pct = (res.sls_qmax / request.allowable_bearing_kN_m2) * 100.0
@@ -112,7 +113,8 @@ def calculate_pad_foundation(request: PadFoundationRequest) -> PadFoundationResp
         (res.shear_y.VEd_kN_m / res.shear_y.VRdc_kN_m) * 100.0 if res.shear_y.VRdc_kN_m else 0.0,
     )
     punching_pct = max(res.punching.ratio, res.punching.ratio0) * 100.0
-    overall_pct = max(bearing_pct, shear_pct, punching_pct)
+    # bearing is a warning only, so it does not set the governing utilisation
+    overall_pct = max(shear_pct, punching_pct)
 
     corners_by_key = _corners_to_c1234(res.corner_pressures)
     sls_corners_by_key = _corners_to_c1234(res.sls_corner_pressures)
@@ -333,7 +335,7 @@ def _build_report(request: PadFoundationRequest, res, steps=None) -> list:
     rows += [
         R("Governing", "qmax, qmin across the four corners",
           f"qmax = {res.sls_qmax:.3f} kN/m2, qmin = {res.sls_qmin:.3f} kN/m2"),
-        R("Bearing check", f"qmax vs allowable {d.allowable_bearing_kN_m2:.3f} kN/m2", res.bearing_status),
+        R("Bearing check (warning only)", f"qmax vs allowable {d.allowable_bearing_kN_m2:.3f} kN/m2; not part of the overall result", res.bearing_status),
         R("Uplift check", "qmin >= 0, no tension", res.uplift_status),
         R("ULS net pressure (for design)", f"q0 = NEd / A = {d.axial_load_kN:.3f} / {res.area_m2:.3f}, "
                                            "corners with ULS moments",
@@ -430,7 +432,7 @@ def _build_report(request: PadFoundationRequest, res, steps=None) -> list:
 
     # ---------------- 12. Final Design Summary ----------------
     sec.append({"section": "12. Final Design Summary", "rows": [
-        R("Bearing pressure (SLS)", f"q0 = {res.sls_q0:.3f}, qmax = {res.sls_qmax:.3f}, qmin = {res.sls_qmin:.3f} kN/m2", res.bearing_status),
+        R("Bearing pressure (SLS) - warning only", f"q0 = {res.sls_q0:.3f}, qmax = {res.sls_qmax:.3f}, qmin = {res.sls_qmin:.3f} kN/m2", res.bearing_status),
         R("Design moments", f"Mx = {res.Mx_kNm_per_m:.3f}, My = {res.My_kNm_per_m:.3f} kNm/m", ""),
         R("Reinforcement, X", f"Y{d.bar_dia_mm:.0f} @ {res.flex_x.spacing_mm:.0f} mm c/c", res.flex_x.status),
         R("Reinforcement, Y", f"Y{d.bar_dia_mm:.0f} @ {res.flex_y.spacing_mm:.0f} mm c/c", res.flex_y.status),
@@ -439,7 +441,7 @@ def _build_report(request: PadFoundationRequest, res, steps=None) -> list:
         R("Punching shear", (f"vEd = {res.punching.vEd:.4f}, vRd = {res.punching.vRd:.4f} N/mm2 at a = {res.punching.a_mm:.0f} mm"
                              if res.punching.applicable else "no control perimeter fits: one-way shear governs")
           + f"; face v0 = {res.punching.v0:.4f}, vRd,max = {res.punching.vRdmax:.4f} N/mm2", res.punching.status),
-        R("Overall", "all checks", res.overall_status),
+        R("Overall", "all checks except bearing (warning only)", res.overall_status),
     ]})
 
     return sec
@@ -514,7 +516,8 @@ def calculate_combined_footing(request: CombinedFootingRequest) -> CombinedFooti
     shear_pct = (res.shear.VEd_kN / res.shear.VRdc_kN) * 100.0 if res.shear.VRdc_kN else 0.0
     pg = res.punching.governing
     punching_pct = max(pg.ratio, pg.ratio0) * 100.0
-    overall_pct = max(bearing_pct, shear_pct, punching_pct)
+    # bearing is a warning only, so it does not set the governing utilisation
+    overall_pct = max(shear_pct, punching_pct)
 
     def _long_out(f, M_signed, x):
         return LongitudinalOut(
@@ -721,7 +724,7 @@ def _build_combined_report(request: CombinedFootingRequest, res, steps=None) -> 
     rows += [
         R("Governing", "qmax, qmin across the four corners",
           f"qmax = {res.sls_qmax:.3f} kN/m2, qmin = {res.sls_qmin:.3f} kN/m2"),
-        R("Bearing check", f"qmax vs allowable {d.allowable_bearing_kN_m2:.3f} kN/m2", res.bearing_status),
+        R("Bearing check (warning only)", f"qmax vs allowable {d.allowable_bearing_kN_m2:.3f} kN/m2; not part of the overall result", res.bearing_status),
         R("Uplift check", "qmin >= 0, no tension", res.uplift_status),
         R("ULS net pressure (for design)", "q0 = (P1 + P2)/A, corners as above with ULS moments",
           f"q0 = {res.q0:.3f}, qmax = {res.qmax:.3f}, qmin = {res.qmin:.3f} kN/m2"),
@@ -836,7 +839,7 @@ def _build_combined_report(request: CombinedFootingRequest, res, steps=None) -> 
     sec.append({"section": "15. Final Design Summary", "rows": [
         R("Load case", res.case_type, ""),
         R("Resultant", f"xR = {res.x_resultant_m:.3f} m from left edge", ""),
-        R("Bearing pressure (SLS)", f"q0 = {res.sls_q0:.3f}, qmax = {res.sls_qmax:.3f}, qmin = {res.sls_qmin:.3f} kN/m2", res.bearing_status),
+        R("Bearing pressure (SLS) - warning only", f"q0 = {res.sls_q0:.3f}, qmax = {res.sls_qmax:.3f}, qmin = {res.sls_qmin:.3f} kN/m2", res.bearing_status),
         R("Longitudinal bottom", f"Y{d.bar_dia_mm:.0f} @ {res.long_flex.spacing_mm:.0f} mm c/c", res.long_flex.status),
         R("Longitudinal top", f"Y{d.bar_dia_mm:.0f} @ {res.long_top_flex.spacing_mm:.0f} mm c/c", res.long_top_flex.status),
         R("Transverse reinforcement", f"Y{d.bar_dia_mm:.0f} @ {res.trans_flex.spacing_mm:.0f} mm c/c", res.trans_flex.status),
@@ -844,7 +847,7 @@ def _build_combined_report(request: CombinedFootingRequest, res, steps=None) -> 
         R("Punching shear", f"governing column {res.punching.governing.column}: vEd = {res.punching.governing.vEd:.4f}, "
                             f"vRd = {res.punching.governing.vRd:.4f}; face {res.punching.governing.v0:.3f}/{res.punching.governing.vRdmax:.3f} N/mm2",
           res.punching.status),
-        R("Overall", "all checks", res.overall_status),
+        R("Overall", "all checks except bearing (warning only)", res.overall_status),
     ]})
 
     return sec

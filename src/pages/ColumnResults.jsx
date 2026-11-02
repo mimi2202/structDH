@@ -83,8 +83,8 @@ export default function ColumnResults() {
                                  || faceKey(l) !== faceKey(levels[0]));
 
   return (
-    <div className="min-h-screen bg-[#f3f4f6] px-6 py-6 dark:bg-[#111827]">
-      <div ref={sheetRef} className="mx-auto max-w-6xl space-y-5">
+    <div className="min-h-screen bg-[#f3f4f6] px-4 py-6 sm:px-6 2xl:px-10 dark:bg-[#111827]">
+      <div ref={sheetRef} className="w-full space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <button onClick={() => navigate("/column-input")} className={`flex items-center gap-2 text-sm ${SUB}`}>
             <FiArrowLeft size={16} /> Back to Input
