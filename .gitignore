@@ -6,6 +6,6 @@ __pycache__/
 .venv/
 *.log
 .DS_Store
-.CLAUDE.md
+CLAUDE.md
 STRUCTVILLE TEXTBOOK_111532.pdf
 build/
