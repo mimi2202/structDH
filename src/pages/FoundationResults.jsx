@@ -643,7 +643,7 @@ function DetailingTab({ det, report }) {
           ])}
         />
         <p className={`mt-2 text-xs ${SUB}`}>
-          F_s = R·z_e/z_i at x = h/2 from the edge (z_e to N_Ed at 0.15b inside the column face, z_i = 0.9d). Bars are U-bars with legs of at least 150 mm, longer where the bent-bar anchorage needs it (book 9.10).
+          F_s = R·z_e/z_i at x = h/2 from the edge (z_e to N_Ed at 0.15b inside the column face, z_i = 0.9d). Bars are U-bars with legs of at least 150 mm, longer where the bent-bar anchorage needs it (EC2 8.4.4, Table 8.2).
           Full-strength bent anchorage for reference: {det.anchorage.map((a) => `${a.lbd_full_mm.toFixed(0)} mm (${a.lbd_full_phi.toFixed(2)}φ)`).join(", ")}.
         </p>
       </Panel>
@@ -651,7 +651,7 @@ function DetailingTab({ det, report }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <Panel title="Bar Callouts (Drawing)">
           {det.callouts.map((c, i) => <KV key={i} label={det.element === "pad" ? (i === 0 ? "Along L" : "Along B") : ["Bottom, longitudinal", "Top, longitudinal", "Bottom, transverse", "Top, transverse"][i]} value={c} strong />)}
-          <p className={`mt-2 text-xs ${SUB}`}>number - size - bar mark - spacing (mm), as on the book's footing drawings.</p>
+          <p className={`mt-2 text-xs ${SUB}`}>number - size - bar mark - spacing (mm).</p>
         </Panel>
         <Panel title="Starter Bars">
           {det.starters ? (
@@ -680,7 +680,7 @@ function DetailingTab({ det, report }) {
           ]}
         />
         <p className={`mt-2 text-xs ${SUB}`}>
-          Cut length = sum of the shape dimensions (the book's convention; BS 8666 bend deductions not applied). Mass per metre 0.395 / 0.616 / 0.888 / 1.579 / 2.466 kg/m for Y8 / Y10 / Y12 / Y16 / Y20. Total {det.summary.total_mass_kg} kg.
+          Cut length = sum of the shape dimensions (BS 8666 bend deductions not applied). Mass per metre 0.395 / 0.616 / 0.888 / 1.579 / 2.466 kg/m for Y8 / Y10 / Y12 / Y16 / Y20. Total {det.summary.total_mass_kg} kg.
         </p>
       </Panel>
       <ReportSections report={report} match={/Detailing/i} heading="Detailing and bar schedule — calculation" />

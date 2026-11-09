@@ -113,10 +113,10 @@ def _build_id():
 # What the report says about verification. Kept here, not buried in the report
 # code, because it must be edited the moment the M_Rd difference is reconciled.
 VERIFICATION_MATCHED = (
-    "Compared with the worked examples for columns E5 and G6 in Ubani: 39 of 40 "
-    "values match. The one difference is an arithmetic slip in the book, which "
-    "reuses the x-direction ei in the z-direction. Sub-frame moments reproduce "
-    "Engr Eazy column C3 exactly."
+    "Compared with two published EC2 worked column examples (E5, G6): 39 of 40 "
+    "values match. The one difference is an arithmetic slip in the published "
+    "example, which reuses the x-direction ei in the z-direction. Sub-frame "
+    "moments reproduce a third published example (C3) exactly."
 )
 
 # Result of verify_mrd_independent.py: the largest difference of the engine's
@@ -138,7 +138,7 @@ VERIFICATION_SECTION = (
 VERIFICATION_E5 = (
     "Recorded difference: for column E5 the calculation gives M_Rd = 37.72 kNm and "
     "the published chart reading is 24.334 kNm (interaction 0.548 against the "
-    "book's 0.935). A chart is read by eye and is not used as the reference. The "
+    "published 0.935). A chart is read by eye and is not used as the reference. The "
     "difference is not explained by the calculation method, which the cross-check "
     "above supports, and the assumptions that were tried (bar arrangement, d2/h, "
     "steel grade) did not close it. It is recorded here, not resolved."

@@ -14,10 +14,10 @@ const TITLE = "text-[13px] font-bold uppercase tracking-wide text-[#0A2F44] dark
 const TABS = ["Overview", "Loading & Analysis", "Flexural Design", "Deflection & Shear", "Detailing & Schedule"];
 const TAB_NOTES = {
   "Overview": "geometry, reactions, the reinforcement adopted and the status of every check.",
-  "Loading & Analysis": "loads on the flight and landing (book 5.4.1) and the force-method analysis of the pinned frame: bending moment, shear and axial force.",
+  "Loading & Analysis": "loads on the flight and landing (EN 1991-1-1, EN 1990 Eq. 6.10) and the force-method analysis of the pinned frame: bending moment, shear and axial force.",
   "Flexural Design": "bottom steel for the span moment, top steel for the hogging moment at the landing junction, and distribution steel.",
   "Deflection & Shear": "span/effective depth check (EC2 7.4.2) and shear without shear reinforcement with the frame's axial force (EC2 6.2.2).",
-  "Detailing & Schedule": "bar arrangement (book 9.9, Section 2-2), anchorage at the landing support (book 9.1.4) and the reinforcement bending/quantity schedule (book 10.6).",
+  "Detailing & Schedule": "bar arrangement (EC2 9.3), anchorage at the landing support (EC2 9.2.1.4) and the reinforcement bending/quantity schedule.",
 };
 const f2 = (v, n = 2) => (v == null ? "-" : Number(v).toFixed(n));
 
@@ -51,7 +51,7 @@ export default function StaircaseResults() {
 
   const download = () => exportElementToPdf(sheetRef.current, `Staircase-${r.member_id}-${tab}`, buildCoverHtml({
     element: "Staircase", member: r.member_id, section: tab, sectionNote: TAB_NOTES[tab],
-    description: "Flight and landing designed per metre width to BS EN 1992-1-1, following Structville section 5.4: "
+    description: "Flight and landing designed per metre width to BS EN 1992-1-1: "
       + "the flight and landing analysed as one frame pinned at both ends by the force method.",
     project: meta.project, location: meta.location,
     facts: [
@@ -83,7 +83,7 @@ export default function StaircaseResults() {
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5">
           <div className={`${CARD} p-5`}>
-            <div className="text-xs text-[#94a3b8] uppercase tracking-wide mb-1">Staircase Design Output · EN 1992-1-1 · Structville 5.4</div>
+            <div className="text-xs text-[#94a3b8] uppercase tracking-wide mb-1">Staircase Design Output · EN 1992-1-1</div>
             <div className="flex items-baseline gap-3 flex-wrap">
               <h1 className="text-2xl font-bold text-[#0A2F44] dark:text-[#66a4c2]">Staircase {r.member_id}</h1>
               <span className={`text-sm ${SUB}`}>{[meta.project, meta.location].filter(Boolean).join(" · ")}</span>
@@ -122,7 +122,7 @@ export default function StaircaseResults() {
               <Panel title="Geometry & Reactions">
                 <KV label="Risers × riser" value={`${g.n_risers} × ${g.riser_mm} = ${f2(g.rise_m * 1000, 0)} mm`} />
                 <KV label="Treads × going" value={`${g.n_treads} × ${g.going_mm} = ${f2(g.going_m * 1000, 0)} mm`} />
-                <KV label="Inclination α (book)" value={`${f2(g.alpha_deg)}°`} />
+                <KV label="Inclination α" value={`${f2(g.alpha_deg)}°`} />
                 <KV label="Flight span / sloping length" value={`${g.flight_span_m} / ${g.sloping_length_m} m`} />
                 <KV label="Landing" value={`${g.landing_m} m`} />
                 <KV label="VA / VC" value={`${f2(an.VA_kN, 3)} / ${f2(an.VC_kN, 3)} kN`} warn={an.VC_kN < 0 || an.VA_kN < 0} />
@@ -149,9 +149,8 @@ export default function StaircaseResults() {
         {tab === "Loading & Analysis" && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Panel title="Loads (book 5.4.1)">
+              <Panel title="Loads (EN 1991-1-1)">
                 <KV label="Waist h × 25 (along slope)" value={`${f2(ld.g_waist, 3)} kN/m²`} />
-                <KV label="Book value × cos α (not used)" value={`${f2(ld.g_waist_book, 3)} kN/m²`} />
                 <KV label="Steps ½ × R × 25" value={`${f2(ld.g_steps, 3)} kN/m²`} />
                 <KV label="Finishes" value={`${f2(ld.finishes, 3)} kN/m²`} />
                 <KV label="gk flight / landing" value={`${f2(ld.gk_flight, 3)} / ${f2(ld.gk_landing, 3)} kN/m²`} />
@@ -220,8 +219,8 @@ export default function StaircaseResults() {
         {tab === "Detailing & Schedule" && <DetailingTab r={r} />}
 
         <p className={`text-xs ${SUB}`}>
-          Computed per EN 1992-1-1 following Structville section 5.4 (design), 9.9 (detailing) and 10.6 (bar schedule), with the frame solved
-          exactly and the waist load taken without the book's cos α factor. Validate against a trusted tool before real design.
+          Computed per EN 1992-1-1 (design and detailing), with the frame solved exactly by the force method.
+          Validate against a trusted tool before real design.
         </p>
       </div>
       {showReport && <ReportModal r={r} onClose={() => setShowReport(false)} />}
@@ -373,20 +372,20 @@ function DetailingTab({ r }) {
   const td = `px-2 py-1.5 align-middle border-b border-[#f1f5f9] dark:border-[#334155] ${MAIN}`;
   return (
     <>
-      <Panel title="Section A–B–C (book Fig. 9.20, Section 2-2)">
+      <Panel title="Section A–B–C">
         <StairSection r={r} />
         <p className={`mt-2 text-xs ${SUB}`}>
           Schematic, to scale. Solid = bottom bars, dashed = top bars. The landing top bar (02) crosses at the knee into the flight soffit,
-          {` ${f2(det.x_cross_mm, 0)} mm past B ((h − 2c)/tan θ); book 1480 − 1270 = 210.`}
+          {` ${f2(det.x_cross_mm, 0)} mm past B ((h − 2c)/tan θ).`}
         </p>
       </Panel>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <Panel title="Bar Callouts (Drawing)">
-          {det.schedule.map((b) => <KV key={b.mark} label={`Mark ${b.mark} (book ${b.book_mark})`} value={b.callout} strong />)}
-          <p className={`mt-2 text-xs ${SUB}`}>number, size, bar mark, spacing (mm) and layer (B / T / NB / NT), as on the book's drawing.</p>
+          {det.schedule.map((b) => <KV key={b.mark} label={`Mark ${b.mark}`} value={b.callout} strong />)}
+          <p className={`mt-2 text-xs ${SUB}`}>number, size, bar mark, spacing (mm) and layer (B / T / NB / NT).</p>
         </Panel>
-        <Panel title="Anchorage (book 9.1.2, 9.1.4)">
+        <Panel title="Anchorage (EC2 8.4, 9.2.1.4)">
           <KV label="l_bd main bars at f_yd" value={`${f2(lm.lbd_mm, 0)} mm (α2 = ${f2(lm.alpha2, 3)})`} />
           <KV label="Leg into floor slab at A" value={`max(500, l_bd) = ${det.leg_slab_mm} mm`} />
           <KV label="Hogging zone at B" value={`flight ${f2(det.hog_flight_mm, 0)} / landing ${f2(det.hog_landing_mm, 0)} mm`} />
@@ -397,14 +396,14 @@ function DetailingTab({ r }) {
         </Panel>
       </div>
 
-      <Panel title="Reinforcement Bending / Quantity Schedule (book 10.6)">
+      <Panel title="Reinforcement Bending / Quantity Schedule">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr>{["S/No", "Bar mark", "Book", "Type & size", "No. of bars", "No. of members", "Shape", "Length (m)", "Total length (m)", ...dias.map((d) => `${d} (kg)`)].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+            <thead><tr>{["S/No", "Bar mark", "Type & size", "No. of bars", "No. of members", "Shape", "Length (m)", "Total length (m)", ...dias.map((d) => `${d} (kg)`)].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
             <tbody>
               {det.schedule.map((b, i) => (
                 <tr key={b.mark}>
-                  <td className={td}>{i + 1}</td><td className={td}>{b.mark}</td><td className={td}>{b.book_mark}</td>
+                  <td className={td}>{i + 1}</td><td className={td}>{b.mark}</td>
                   <td className={td}>{b.type_size}</td><td className={td}>{b.n_bars}</td><td className={td}>{b.n_members}</td>
                   <td className={td}><BarSketch b={b} /></td>
                   <td className={td}>{b.length_m.toFixed(3)}</td><td className={td}>{b.total_length_m.toFixed(3)}</td>
@@ -419,9 +418,8 @@ function DetailingTab({ r }) {
           </table>
         </div>
         <p className={`mt-2 text-xs ${SUB}`}>
-          Cut length = sum of the shape dimensions (the book's convention; no bend deduction). Bars across the width = floor((W − 2c)/s) + 1
-          (book: 5 bars in 885 at 200). Total {det.summary.total_mass_kg} kg for {det.schedule[0]?.n_members} staircase(s).
-          The book's own lengths are scaled from its drawing, so they differ slightly from these.
+          Cut length = sum of the shape dimensions (BS 8666 bend deductions not applied). Bars across the width = floor((W − 2c)/s) + 1.
+          Total {det.summary.total_mass_kg} kg for {det.schedule[0]?.n_members} staircase(s).
         </p>
       </Panel>
       <ReportSections report={r.report} match={/Detailing/i} heading="Detailing and bar schedule — calculation" />

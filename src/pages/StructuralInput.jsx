@@ -63,10 +63,9 @@ const STEEL_GRADES = [
 const DESIGN_CODES = [
   { value: "EC2", label: "EN 1992-1-1 (Eurocode 2)" },
 ];
+// EC2 is limit state only; the other choices were sent but never used.
 const ANALYSIS_METHODS = [
   { value: "limit_state", label: "Limit State Method" },
-  { value: "working_stress", label: "Working Stress Method" },
-  { value: "elastic", label: "Elastic Analysis" },
 ];
 
 // Values map to the engine's classify_occupancy() keys (anything else → office).
@@ -109,6 +108,7 @@ const DEFAULTS = {
   thickness: "175", // mm
   clearCover: "25", // mm — backend always adds a fixed +5mm detailing tolerance on top of this; not user-configurable
   mainBarDia: "12", // mm assumed main bar
+  autoBars: false,
   concreteGrade: "C30/37",
   steelGrade: "B500",
   unitWeightConcrete: "25",
@@ -123,11 +123,7 @@ const DEFAULTS = {
   designCode: "EC2",
   analysisMethod: "limit_state",
   buildingUse: "office",
-  serviceabilityCheck: true,
   exposureClass: "XC3",
-  crackWidthLimit: "0.3",
-  fireRating: "60",
-  deflectionLimit: "250",
 
   // Printed on the first page of the Detailed Report. Blank stays blank.
   designerName: "", designerQualifications: "",
@@ -246,7 +242,7 @@ const StructuralInput = () => {
       {/* <Sidebar active="slab" navigate={navigate} /> */}
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopBar twoWay={twoWay} navigate={navigate} onReset={handleReset} />
+        <TopBar twoWay={twoWay} onReset={handleReset} />
 
         <div className="flex-1 px-6 py-6">
           {error && (
@@ -309,6 +305,8 @@ const StructuralInput = () => {
                     <label className={LABEL}>Main Bar &Oslash; <span className="text-[#94a3b8]">(mm)</span></label>
                     <Dropdown value={formData.mainBarDia} onChange={(e) => set({ mainBarDia: e.target.value })} options={MAIN_BARS} />
                     <p className={`mt-1 text-[10px] ${SUB}`}>Used for d = h &minus; c &minus; &phi;/2</p>
+                    <label className="mt-2 flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={!!formData.autoBars} onChange={(e) => set({ autoBars: e.target.checked })} className="h-4 w-4 accent-[#0A2F44]" /><span>Let the engine choose the bar size</span></label>
+                    <p className={`mt-1 text-[10px] ${SUB}`}>{formData.autoBars ? "Each standard size is designed in turn; the passing one with the least steel is used and every option is listed in the report. The bar above is ignored." : "Only this bar is used. If it cannot carry the load, the design fails and says so."}</p>
                   </div>
                 </div>
               </Section>
@@ -360,7 +358,7 @@ const StructuralInput = () => {
                   </div>
                   <div>
                     <label className={LABEL}>Analysis Method</label>
-                    <Dropdown value={formData.analysisMethod} onChange={(e) => set({ analysisMethod: e.target.value })} options={ANALYSIS_METHODS} />
+                    <div className={`${INPUT} flex items-center`}><span className={MAIN}>Limit State (EC2)</span></div>
                   </div>
                   <div>
                     <label className={LABEL}>Building Use</label>
@@ -368,13 +366,6 @@ const StructuralInput = () => {
                       const u = BUILDING_USES.find((o) => o.value === e.target.value);
                       set({ buildingUse: e.target.value, ...(u && u.qk != null ? { liveLoad: String(u.qk) } : {}) });
                     }} options={BUILDING_USES} />
-                  </div>
-                  <div>
-                    <label className={LABEL}>Serviceability Check</label>
-                    <div className="flex h-[42px] items-center justify-between rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-3">
-                      <span className={`text-xs ${SUB}`}>Deflection &amp; crack width</span>
-                      <Toggle checked={formData.serviceabilityCheck} onChange={(c) => set({ serviceabilityCheck: c })} />
-                    </div>
                   </div>
                 </div>
               </Section>
@@ -484,7 +475,8 @@ function Sidebar({ active, navigate }) {
   return (
     <aside className="hidden md:flex w-44 shrink-0 flex-col border-r border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1f2937]">
       <nav className="flex-1 space-y-1 p-3 pt-4">
-        {NAV.map(({ id, label, icon: Icon }) => {
+        {NAV.map(({ id, label, icon }) => {
+          const Icon = icon;
           const on = id === active;
           return (
             <button
@@ -510,7 +502,7 @@ function Sidebar({ active, navigate }) {
   );
 }
 
-function TopBar({ twoWay, navigate, onReset }) {
+function TopBar({ twoWay, onReset }) {
   return (
     <header className="flex items-center justify-between border-b border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1f2937] px-4 py-2.5">
       <div className="flex items-center gap-6">
@@ -534,7 +526,8 @@ function TopBar({ twoWay, navigate, onReset }) {
   );
 }
 
-function TopBtn({ icon: Icon, label, onClick }) {
+function TopBtn({ icon, label, onClick }) {
+  const Icon = icon;
   return (
     <button onClick={onClick} className={`hidden sm:flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#334155]`}>
       <Icon size={15} /> {label}

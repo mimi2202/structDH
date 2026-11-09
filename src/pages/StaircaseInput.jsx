@@ -27,7 +27,7 @@ const DEFAULTS = {
   width_mm: "885", support_width_mm: "230", n_members: "1",
   finishes_kN_m2: "1.2", qk_kN_m2: "3.0",
   concrete: "C25/30", fyk: "460", cover_mm: "25",
-  main_bar_mm: "12", main_spacing_mm: "200",
+  main_bar_mm: "12", main_spacing_mm: "200", autoBars: false,
   top_bar_mm: "12", top_spacing_mm: "",
   dist_bar_mm: "10", dist_spacing_mm: "250",
   designer_name: "", designer_qualifications: "", checked_by: "", checker_qualifications: "",
@@ -69,6 +69,7 @@ export default function StaircaseInput() {
         finishes_kN_m2: num(form.finishes_kN_m2) || 0, qk_kN_m2: num(form.qk_kN_m2) || 0,
         fck: fckOf(form.concrete), fyk: num(form.fyk) || 500, cover_mm: num(form.cover_mm),
         main_bar_mm: num(form.main_bar_mm), main_spacing_mm: optNum(form.main_spacing_mm),
+        auto_bars: !!form.autoBars,
         top_bar_mm: num(form.top_bar_mm), top_spacing_mm: optNum(form.top_spacing_mm),
         dist_bar_mm: num(form.dist_bar_mm), dist_spacing_mm: optNum(form.dist_spacing_mm),
         width_mm: num(form.width_mm), support_width_mm: num(form.support_width_mm),
@@ -105,7 +106,7 @@ export default function StaircaseInput() {
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#0A2F44] text-white"><FiTriangle size={15} /></div>
         <div>
           <div className={`text-sm font-bold ${MAIN}`}>Staircase Input (EC2)</div>
-          <div className={`text-[11px] ${SUB}`}>Flight + landing, per metre width · Structville 5.4 · kN, m</div>
+          <div className={`text-[11px] ${SUB}`}>Flight + landing, per metre width · EN 1992-1-1 · kN, m</div>
         </div>
       </header>
 
@@ -139,9 +140,8 @@ export default function StaircaseInput() {
               </div>
               <p className={`mt-3 text-xs ${SUB}`}>
                 Flight span: horizontal distance from the centre of the top support (A) to where the flight meets the landing (B).
-                Landing length: from B to the centre of the landing support (C). Treads = risers − 1 (book: 10 risers, 9 treads).
-                The book's example: flight span 2515 = 9 × 250 + 265 to the support.
-                Stair width and the landing support (wall or beam at C) are used for detailing and the bar schedule (book: flight 885 wide, 230 mm wall).
+                Landing length: from B to the centre of the landing support (C). Treads = risers − 1.
+                Stair width and the landing support (wall or beam at C) are used for detailing and the bar schedule.
               </p>
             </Card>
 
@@ -161,7 +161,9 @@ export default function StaircaseInput() {
                 <div><label className={LABEL}>Concrete</label><Dropdown value={form.concrete} onChange={(v) => set({ concrete: v })} options={CONCRETE} /></div>
                 <Num label="Steel fyk" unit="N/mm²" value={form.fyk} onChange={(v) => set({ fyk: v })} />
                 <Num label="Cover" unit="mm" value={form.cover_mm} onChange={(v) => set({ cover_mm: v })} />
-                <div><label className={LABEL}>Main bar (bottom)</label><Dropdown value={form.main_bar_mm} onChange={(v) => set({ main_bar_mm: v })} options={BARS} /></div>
+                <div><label className={LABEL}>Main bar (bottom)</label><Dropdown value={form.main_bar_mm} onChange={(v) => set({ main_bar_mm: v })} options={BARS} />
+                  <label className="mt-2 flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={!!form.autoBars} onChange={(e) => set({ autoBars: e.target.checked })} className="h-4 w-4 accent-[#0A2F44]" /><span>Let the engine choose the bar size</span></label>
+                    <p className={`mt-1 text-[10px] ${SUB}`}>{form.autoBars ? "Each standard size is designed in turn; the passing one with the least steel is used and every option is listed in the report. The bar above is ignored." : "Only this bar is used. If it cannot carry the load, the design fails and says so."}</p></div>
                 <Num label="Main spacing (blank = auto)" unit="mm" value={form.main_spacing_mm} onChange={(v) => set({ main_spacing_mm: v })} />
                 <div />
                 <div><label className={LABEL}>Top bar (at landing junction)</label><Dropdown value={form.top_bar_mm} onChange={(v) => set({ top_bar_mm: v })} options={BARS} /></div>
@@ -172,7 +174,7 @@ export default function StaircaseInput() {
                 <Num label="No. of identical staircases (schedule)" value={form.n_members} onChange={(v) => set({ n_members: v })} />
               </div>
               <p className={`mt-3 text-xs ${SUB}`}>
-                d = h − cover − φ/2 (cover as entered, as in the book). The book uses fyk = 460 and Y12 @ 200 / Y10 @ 250.
+                d = h − cover − φ/2 (cover as entered; cover for exposure and fire is not checked).
                 Top steel is only designed if the frame analysis gives a hogging moment.
               </p>
             </Card>
@@ -226,8 +228,8 @@ export default function StaircaseInput() {
                 <div className="flex items-start gap-2 rounded-lg bg-[#e6f0f5] dark:bg-[#1e3a4a] p-3">
                   <FiInfo className="mt-0.5 flex-shrink-0 text-[#0A2F44] dark:text-[#cce1eb]" size={14} />
                   <p className="text-xs text-[#0A2F44] dark:text-[#cce1eb]">
-                    Analysed as in the book: flight and landing as one frame, pinned at both ends, by the force method.
-                    Both supports must resist the horizontal thrust. Detailing and the bar schedule are not produced yet.
+                    Flight and landing analysed as one frame, pinned at both ends, by the force method (linear elastic, EC2 5.4).
+                    Both supports must resist the horizontal thrust. Detailing and the bar schedule are on the results page.
                   </p>
                 </div>
               </div>

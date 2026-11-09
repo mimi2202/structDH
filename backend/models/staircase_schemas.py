@@ -20,6 +20,9 @@ class StaircaseRequest(BaseModel):
     fyk: float = Field(460, ge=250, le=600)
     cover_mm: float = Field(25, ge=10, le=75)
     main_bar_mm: float = Field(12, ge=8, le=25)
+    # Let the engine choose the bar size (column-page style): designed with each
+    # standard size, least steel among the passing designs. Off: the bar given only.
+    auto_bars: bool = False
     main_spacing_mm: Optional[float] = Field(None, ge=50, le=400)
     top_bar_mm: float = Field(12, ge=8, le=25)
     top_spacing_mm: Optional[float] = Field(None, ge=50, le=400)

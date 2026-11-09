@@ -188,7 +188,7 @@ export default function ContinuousBeamResults() {
         <Card n="10" title="Serviceability Checks (SLS)">
           <Tbl head={["Check", "Limit", "Calc", "Status"]} rows={[
             ["Deflection (span/depth L/d)", `\u2264 ${sls.deflection_limit}`, `${sls.deflection_actual}`, ok(sls.deflection_status === "PASS")],
-            ["Crack width", `${sls.crack_limit} mm`, `${sls.crack_width} mm`, ok(sls.crack_status === "PASS")],
+            ["Crack control (EC2 7.3.3)", `w_max ${sls.crack_limit} mm`, `Table 7.2N/7.3N ratio ${sls.crack_ratio ?? "-"}`, ok(sls.crack_status === "PASS")],
           ]} />
         </Card>
         <Card n="11" title="Reinforcement Details">

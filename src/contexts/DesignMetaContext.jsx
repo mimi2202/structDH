@@ -26,8 +26,11 @@ import React, { createContext, useContext, useState, useCallback } from "react";
 const DEFAULT_META = {
   designCode: "EC2",
   analysisMethod: "Limit State",
-  concreteGrade: "C30/37",
-  steelGrade: "B500",
+  // No default grades: a fixed "C30/37 / B500" was shown on every page
+  // whatever the designer picked. The strip hides them until a results
+  // page publishes the real ones.
+  concreteGrade: null,
+  steelGrade: null,
 };
 
 const DesignMetaContext = createContext({
@@ -52,6 +55,7 @@ export function DesignMetaProvider({ children }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- hook lives with its provider
 export function useDesignMeta() {
   return useContext(DesignMetaContext);
 }

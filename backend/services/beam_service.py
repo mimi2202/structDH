@@ -126,6 +126,19 @@ def parse_fy(grade):
 
 
 def calculate_beam_design(request: BeamDesignRequest) -> BeamDesignResult:
+    """Main bar: the one given (bar_diameters[0]) or, with auto_bars, the
+    passing standard size with the least tension + compression steel."""
+    from services import bar_selection
+    return bar_selection.run(
+        request, _calculate_beam_design, lambda dia: {"bar_diameters": [dia]}, [12, 16, 20, 25, 32],
+        lambda r: r.summary.status,
+        lambda r: (r.reinforcement.tension.get("area_provided") or 0) + (r.reinforcement.compression.get("area_provided") or 0),
+        "A_s,prov tension + compression (mm2)",
+        fits=lambda r: bar_selection.bars_fit(r.reinforcement.tension.get("label", ""), request.geometry.width,
+                                              request.geometry.effective_cover, request.link_diameter or 8))
+
+
+def _calculate_beam_design(request: BeamDesignRequest) -> BeamDesignResult:
     code = _enum(request.design_code)
     is_bs = code == "BS8110"
     support = _enum(request.support_condition)

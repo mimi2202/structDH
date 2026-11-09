@@ -64,6 +64,15 @@ def _resolve_rates(db, region):
 
 
 def calculate_continuous_slab(request: ContinuousSlabRequest) -> ContinuousSlabResult:
+    """Bar size: the one given (bar_diameters[0]) or, with auto_bars, the
+    lightest passing standard size (services/bar_selection.py)."""
+    from services import bar_selection
+    return bar_selection.run(
+        request, _calculate_continuous_slab, lambda dia: {"bar_diameters": [dia]}, [10, 12, 16, 20],
+        lambda r: r.summary.status, lambda r: r.cost_breakdown.steel["weight"], "steel weight (kg)")
+
+
+def _calculate_continuous_slab(request: ContinuousSlabRequest) -> ContinuousSlabResult:
     mats = request.materials
     loads = request.loads
 
@@ -101,7 +110,7 @@ def calculate_continuous_slab(request: ContinuousSlabRequest) -> ContinuousSlabR
     cost_concrete = volume_concrete * concrete_rate
     as_span = max((s.bar.As_prov for s in res.spans if s.bar), default=0.0)
     as_supp = max((s.bar.As_prov for s in res.supports if s.bar), default=0.0)
-    steel_weight = (as_span + as_supp) * total_len * 7850 / 1e6
+    steel_weight = (as_span + as_supp) * total_len * (request.materials.unit_weight_steel or 78.5) * 100 / 1e6
     cost_steel = steel_weight * steel_rate / 1000
     cost_formwork = total_len * formwork_rate
     total_cost = cost_concrete + cost_steel + cost_formwork

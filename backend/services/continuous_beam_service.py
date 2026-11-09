@@ -20,6 +20,92 @@ from services.report_front_matter import (
 
 PI = math.pi
 
+# EC2 Table 4.4N, c_min,dur (mm) for structural class S4 (50-year life);
+# Table 4.3N: 100-year life -> +2 classes (S6) = +10 mm.
+C_MIN_DUR_S4 = {"XC1": 15, "XC2": 25, "XC3": 25, "XC4": 30, "XD1": 35, "XD2": 40, "XD3": 45,
+                "XS1": 35, "XS2": 40, "XS3": 45}
+
+
+# EC2 Table 7.1N (recommended w_max, quasi-permanent) and Table 7.2N
+# (max bar size, mm) for w = 0.4 / 0.3 / 0.2 mm; spacing from Table 7.3N.
+W_MAX_7_1N = {"XC1": 0.4}                     # every other class: 0.3
+PHI_MAX_7_2N = [(160, 40, 32, 25), (200, 32, 25, 16), (240, 20, 16, 12), (280, 16, 12, 8),
+                (320, 12, 10, 6), (360, 10, 8, 5), (400, 8, 6, 4), (450, 6, 5, 0)]
+PSI2_ASSUMED = 0.6                            # no occupancy on the beam page (EN 1990 Table A1.1, C/D/F)
+
+
+def _phi_max_7_2N(sigma, col):
+    rows = [(r[0], r[col]) for r in PHI_MAX_7_2N]
+    if sigma <= rows[0][0]:
+        return float(rows[0][1])
+    for (s1, v1), (s2, v2) in zip(rows, rows[1:]):
+        if sigma <= s2:
+            return v1 + (v2 - v1) * (sigma - s1) / (s2 - s1)
+    return 0.0
+
+
+def _crack_check(request, r, fl, span_gk, span_qk, link):
+    """EC2 7.3.3 without direct calculation: sigma_s under quasi-permanent
+    loads; OK if the bar size meets Table 7.2N or the spacing Table 7.3N.
+    Returns (rows, status, ratio, w_lim)."""
+    from services.continuous_slab_service import _s_max_7_3N
+    exp = _enum(request.design_params.exposure_class)
+    w_lim = W_MAX_7_1N.get(exp, 0.3)
+    col = 1 if w_lim >= 0.4 else 2 if w_lim >= 0.3 else 3
+    g = request.geometry
+    qp = [(gk + PSI2_ASSUMED * qk) / (1.35 * gk + 1.5 * qk) if (gk + qk) else 0.0
+          for gk, qk in zip(span_gk, span_qk)]
+    n = len(qp)
+    secs = [(f"Span {i + 1}", fl["spans"].get(f"Span {i + 1}", {}), qp[i]) for i in range(n)]
+    secs += [(f"S{j + 1}", fl["supports"][f"S{j + 1}"],
+              max(qp[k] for k in (j - 1, j) if 0 <= k < n)) for j in range(n + 1) if f"S{j + 1}" in fl["supports"]]
+    rows = [{"ref": "EC2 Table 7.1N", "calc": f"exposure {exp}: w_max = {w_lim} mm; quasi-permanent psi_2 = {PSI2_ASSUMED} "
+                                              "assumed (no occupancy given; EN 1990 Table A1.1)", "out": f"w_max = {w_lim} mm"}]
+    ok_all, worst = True, 0.0
+    for label, sd, q in secs:
+        M, As, z, bars = sd.get("M_kNm", 0) or 0, sd.get("As_provided_mm2", 0), sd.get("z_mm") or 0, sd.get("bars", "")
+        if M <= 0 or not As or not z or "Y" not in bars:
+            continue
+        nb, phi = int(bars.split("Y")[0]), float(bars.split("Y")[1])
+        sigma = M * q * 1e6 / (z * As)
+        s = (g.width - 2 * (g.cover + link) - phi) / (nb - 1) if nb > 1 else g.width
+        phi_max, s_max = _phi_max_7_2N(sigma, col), _s_max_7_3N(sigma, col)
+        ratio = min(phi / phi_max if phi_max else 9.99, s / s_max if s_max else 9.99)
+        ok = ratio <= 1.0 + 1e-6
+        ok_all, worst = ok_all and ok, max(worst, ratio)
+        rows.append({"ref": f"EC2 7.3.3 -- {label}",
+                     "calc": f"sigma_s = M qp/(z As) = {M:.1f} x {q:.3f} x 10^6/({z:.0f} x {As:.0f}) = {sigma:.0f} MPa; "
+                             f"{bars}: phi {phi:.0f} vs phi_max {phi_max:.1f} (Table 7.2N); s = {s:.0f} vs s_max {s_max:.0f} mm (Table 7.3N)",
+                     "out": f"{'OK' if ok else 'NOT OK'} ({ratio:.2f})"})
+    return rows, "PASS" if ok_all else "FAIL", worst, w_lim
+
+
+def _cover_check(request, link, bars):
+    """EC2 4.4.1 for the exposure class and design working life entered.
+    The entered cover is to the links; the engine adds delta_c_dev = 5 mm,
+    so the check is c >= c_min (Eq. 4.2) for the links and c + link >= c_min
+    for the main bars. Returns (report rows, status, ratio)."""
+    dp = request.design_params
+    exp = _enum(dp.exposure_class)
+    life = int(dp.design_working_life or 50)
+    c_dur = C_MIN_DUR_S4.get(exp, 25) + (10 if life >= 100 else 0)
+    phi_max = max((int(b.split("Y")[1]) for b in bars if "Y" in b), default=16)
+    c = request.geometry.cover
+    need_link = max(link, c_dur, 10)
+    need_main = max(phi_max, c_dur, 10)
+    ok = c >= need_link - 1e-6 and c + link >= need_main - 1e-6
+    ratio = max(need_link / c if c else 9.99, need_main / (c + link))
+    rows = [
+        {"ref": "EC2 Table 4.3N, 4.4N", "calc": f"exposure {exp}, design working life {life} years -> structural class "
+                                                f"{'S6 (S4 + 2)' if life >= 100 else 'S4'}", "out": f"c_min,dur = {c_dur} mm"},
+        {"ref": "EC2 Eq. 4.2 (links)", "calc": f"c_min = max(c_min,b = link {link:.0f}; c_min,dur {c_dur}; 10) vs cover to links c = {c:.0f}",
+         "out": f"{need_link:.0f} mm {'OK' if c >= need_link - 1e-6 else 'NOT OK'}"},
+        {"ref": "EC2 Eq. 4.2 (main bars)", "calc": f"c_min = max(c_min,b = bar {phi_max}; c_min,dur {c_dur}; 10) vs c + link = {c + link:.0f}",
+         "out": f"{need_main:.0f} mm {'OK' if c + link >= need_main - 1e-6 else 'NOT OK'}"},
+        {"ref": "EC2 4.4.1.3", "calc": "c_nom = c + delta_c_dev (5 mm, added by the engine)", "out": f"c_nom = {c + 5:.0f} mm"},
+    ]
+    return rows, "PASS" if ok else "FAIL", ratio
+
 # Fallback bar diameters if the request doesn't carry a bar_diameters field
 # yet (ContinuousBeamRequest may not expose one -- see note at bottom of file).
 DEFAULT_BAR_DIAMETERS = [16, 20, 25, 32]
@@ -68,8 +154,8 @@ def _front_matter(request, n, lengths, b, h, checks):
         loading=("One load case: 1.35 Gk + 1.5 Qk on every span at once (Eq. 6.10). Pattern "
                  "loading (Cl. 5.1.3) is not applied, so sagging in a span next to a lightly loaded "
                  "one, and some support moments, can be underestimated. Uniform loads only."),
-        not_assessed=("pattern loading; crack width (the results show 0.00 mm and PASS, but no "
-                      "crack calculation is made); " + BEAM_COMMON_OUT + "."),
+        not_assessed=("pattern loading; direct crack-width calculation (EC2 7.3.4) -- crack control "
+                      "is by Tables 7.2N / 7.3N, section 10c; " + BEAM_COMMON_OUT + "."),
         verification=[("Verification",
                        "No comparison with a published worked example is recorded for this module. "
                        "Hand-check the moments, which come without pattern loading, before use.",
@@ -78,8 +164,8 @@ def _front_matter(request, n, lengths, b, h, checks):
                  + [ndp_alpha_cc_k_method(" The f_cd = f_ck/1.5 printed in section 2 (alpha_cc = 1.0) "
                                           "is used only for V_Rd,max; the UK NA gives 0.85 for "
                                           "flexure and axial load and 1.0 for other phenomena.")]
-                 + ndp_cover_rows("Not applied: the beam takes the clear cover entered and does not "
-                                  "check it against an exposure class.")
+                 + ndp_cover_rows("Cover to links checked against the exposure class and design working "
+                                  "life entered (Table 4.4N, S4; S6 for 100 years), section 10b.")
                  + [ndp_min_steel(), ndp_shear_no_links(),
                     _fm_row("EN 1992-1-1 Cl. 6.2.3, 9.2.2",
                             "Links: cot theta = 2.5, z = 0.9d, f_ywd = f_yk/1.15, nu_1 = "
@@ -95,6 +181,26 @@ def _front_matter(request, n, lengths, b, h, checks):
 
 
 def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamResult:
+    """Main bar: the one given (bar_diameters[0]) or, with auto_bars, the
+    passing standard size with the least steel over all spans and supports."""
+    from services import bar_selection
+
+    def steel(r):
+        return (sum(s.bottom_steel.get("area_provided", 0) * s.length / 1000 for s in r.spans)
+                + sum(s.top_steel.get("area_provided", 0) for s in r.supports if s.m_hogging > 0))
+    def fits(r):
+        bad = [bar_selection.bars_fit(x.get("label", ""), request.geometry.width, request.geometry.cover,
+                                      request.link_diameter or 8)
+               for x in [s.bottom_steel for s in r.spans] + [s.top_steel for s in r.supports if s.m_hogging > 0]]
+        bad = [note for ok, note in bad if not ok]
+        return (not bad), "; ".join(bad[:2])
+    return bar_selection.run(
+        request, _calculate_continuous_beam, lambda dia: {"bar_diameters": [dia]}, [12, 16, 20, 25, 32],
+        lambda r: r.summary.status, steel, "span A_s,prov x length + support A_s,prov (comparison only)",
+        fits=fits)
+
+
+def _calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamResult:
     code = _enum(request.design_code)
     is_bs = code == "BS8110"
     g = request.geometry
@@ -147,6 +253,7 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
         bar_diameters=bar_diameters,
         effective_depth_override_mm=g.effective_depth,
         span_loads_override=span_udls,
+        fixed_ends=_enum(request.end_support) == "continuous",
     )
     r = design_continuous_beam(eng_in)
 
@@ -286,7 +393,11 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
     
     # Overall status must be consistent with the engine
     bend_ok = util_bend <= 1.0
-    overall = "PASS" if (bend_ok and shear_ok and defl_status == "PASS") else "FAIL"
+    all_bars = [sd.get("bars", "") for sd in list(fl["spans"].values()) + list(fl["supports"].values())]
+    cover_rows, cover_status, cover_ratio = _cover_check(request, link, all_bars)
+    crack_rows, crack_status, crack_ratio, crack_lim = _crack_check(request, r, fl, span_gk, span_qk, link)
+    overall = "PASS" if (bend_ok and shear_ok and defl_status == "PASS" and cover_status == "PASS"
+                         and crack_status == "PASS") else "FAIL"
     code_label = "BS 8110:1997" if is_bs else "EN 1992-1-1 (EC2)"
 
     shr = r["shear"]
@@ -326,13 +437,25 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
 
     checks = [("Bending", util_bend, "PASS" if bend_ok else "FAIL"),
               ("Shear", util_shear, "PASS" if shear_ok else "FAIL"),
-              ("Deflection (span/depth)", defl["actual_Ld"] / defl["allowable_Ld"] if defl.get("allowable_Ld") else None, defl_status)]
+              ("Deflection (span/depth)", defl["actual_Ld"] / defl["allowable_Ld"] if defl.get("allowable_Ld") else None, defl_status),
+              (f"Cover for exposure {_enum(request.design_params.exposure_class)}", cover_ratio, cover_status),
+              ("Crack control (EC2 7.3.3)", crack_ratio, crack_status)]
     report = [ReportSection(title=sec["title"], rows=[ReportRow(**x) for x in sec["rows"]])
               for sec in _front_matter(request, n, lengths, b, h, checks)]
+    ends = ("Continuous (monolithic) end supports: the outer supports are analysed fixed as well as "
+            "pinned; end supports take the fixed-end hogging, spans the pinned-end sagging, "
+            "interior supports and shear the worse of the two."
+            if _enum(request.end_support) == "continuous" else
+            "Simple (pinned) end supports: no hogging at the outer supports.")
+    report.append(ReportSection(title="1a. End Supports", rows=[ReportRow(reference="Analysis", calculation=ends, output="adopted")]))
     for sec in r.get("report", []):
         rows = [ReportRow(reference=row["ref"], calculation=row["calc"], output=row["out"])
                 for row in sec["rows"]]
         report.append(ReportSection(title=sec["section"], rows=rows))
+    report.append(ReportSection(title="10b. Cover for Durability (EC2 4.4.1)",
+                                rows=[ReportRow(reference=x["ref"], calculation=x["calc"], output=x["out"]) for x in cover_rows]))
+    report.append(ReportSection(title="10c. Crack Control (EC2 7.3.3)",
+                                rows=[ReportRow(reference=x["ref"], calculation=x["calc"], output=x["out"]) for x in crack_rows]))
 
     warnings = []
     Lmin, Lmax = min(lengths), max(lengths)
@@ -387,6 +510,7 @@ def calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeamR
                         max_shear=round(max_shear, 2), ultimate_combo=combo),
         capacity=CBCapacity(utilization_bending=round(util_bend, 2), utilization_shear=round(util_shear, 2)),
         sls=CBSLS(deflection_actual=defl["actual_Ld"], deflection_limit=defl["allowable_Ld"],
-                  deflection_status=defl_status, crack_width=0.0, crack_limit=0.30, crack_status="PASS"),
+                  deflection_status=defl_status, crack_width=None, crack_limit=crack_lim,
+                  crack_status=crack_status, crack_ratio=round(crack_ratio, 2)),
         shear_detail=shear_detail, deflection_detail=deflection_detail,
         report=report, warnings=warnings, notes=notes)

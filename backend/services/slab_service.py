@@ -199,6 +199,15 @@ def _slab_front_matter(request, compliance, two_way, inp, res):
 
 
 def calculate_slab_design(request: SlabDesignRequest) -> SlabDesignResult:
+    """Bar size: the one given (bar_diameters[0]) or, with auto_bars, the
+    lightest passing standard size (services/bar_selection.py)."""
+    from services import bar_selection
+    return bar_selection.run(
+        request, _calculate_slab_design, lambda dia: {"bar_diameters": [dia]}, [10, 12, 16, 20],
+        lambda r: r.summary.status, lambda r: r.cost_breakdown.steel["weight"], "steel weight (kg per m width)")
+
+
+def _calculate_slab_design(request: SlabDesignRequest) -> SlabDesignResult:
     code = _enum(request.design_params.design_code)
     slab_type_val = _enum(request.slab_type)
     continuity_val = _enum(request.continuity)
@@ -257,6 +266,9 @@ def _calculate_two_way_slab(request: SlabDesignRequest) -> SlabDesignResult:
         gk_services_kN_m2=gk_services,
         qk_imposed_kN_m2=qk_imposed,
         candidate_bar_diameters_mm=request.bar_diameters or None,
+        # the user's bar first (was the engine's preset bar, kept whenever it passed)
+        main_bar_diameter_mm=request.bar_diameters[0] if request.bar_diameters else None,
+        unit_weight_concrete=mats.unit_weight_concrete or 25.0,
     )
 
     res = TwoWaySlabDesigner(inp).run()
@@ -291,7 +303,7 @@ def _calculate_two_way_slab(request: SlabDesignRequest) -> SlabDesignResult:
     steel_rate = _rate(steel_tbl, mats.steel_grade, 950000)
     volume_concrete = res.thickness_mm / 1000.0 * 1.0
     cost_concrete = volume_concrete * concrete_rate
-    steel_weight = (as_prov_x + (res.main_y.As_provided_mm2_per_m if res.main_y else 0)) * 1.0 * 7850 / 1e6
+    steel_weight = (as_prov_x + (res.main_y.As_provided_mm2_per_m if res.main_y else 0)) * 1.0 * (mats.unit_weight_steel or 78.5) * 100 / 1e6
     cost_steel = steel_weight * steel_rate / 1000
     cost_formwork = 1.0 * formwork_rate
     total_cost = cost_concrete + cost_steel + cost_formwork
@@ -641,7 +653,7 @@ def _calculate_one_way_slab(request: SlabDesignRequest) -> SlabDesignResult:
     steel_rate = _rate(steel_tbl, mats.steel_grade, 950000)
     volume_concrete = res.d_mm and (request.geometry.thickness / 1000.0 * 1.0)
     cost_concrete = volume_concrete * concrete_rate
-    steel_weight = (as_prov_span + as_prov_supp) * 1.0 * 7850 / 1e6
+    steel_weight = (as_prov_span + as_prov_supp) * 1.0 * (mats.unit_weight_steel or 78.5) * 100 / 1e6
     cost_steel = steel_weight * steel_rate / 1000
     cost_formwork = 1.0 * formwork_rate
     total_cost = cost_concrete + cost_steel + cost_formwork

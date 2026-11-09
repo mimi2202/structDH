@@ -67,6 +67,9 @@ class BeamDesignRequest(BaseModel):
     materials: BeamMaterials
     loads: BeamLoads
     bar_diameters: Optional[List[int]] = Field([16, 20, 25, 32])
+    # Let the engine choose the bar size (column-page style): designed with each
+    # standard size, least steel among the passing designs. Off: the bar given only.
+    auto_bars: bool = False
     link_diameter: int = 8
     region: str = "Nigeria"
     design_basis: BeamDesignBasis = BeamDesignBasis()
@@ -196,3 +199,4 @@ class BeamDesignResult(BaseModel):
     deflection_detail: Optional[BeamDeflectionDetail] = None
     notes: List[str]
     report: List[ReportSection] = []
+    bar_selection: Optional[Dict] = None   # set when auto_bars was on

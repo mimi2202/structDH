@@ -58,6 +58,7 @@ const DEFAULTS = {
   additionalDeadLoad: "0",
   additionalLiveLoad: "0",
   mainBarDia: "12",
+  autoBars: false,
   designCode: "EC2",
   occupancy: "",
   region: "Nigeria",
@@ -71,11 +72,6 @@ const DEFAULTS = {
   stabilityResponsible: "", independentCheck: "",
 };
 
-const numOrNull = (v) => {
-  if (v === "" || v === null || v === undefined) return null;
-  const n = parseFloat(v);
-  return Number.isFinite(n) ? n : null;
-};
 
 export default function ContinuousSlabInput() {
   const navigate = useNavigate();
@@ -237,6 +233,8 @@ export default function ContinuousSlabInput() {
                 <div>
                   <label className={LABEL}>Main bar &Oslash; <span className="text-[#94a3b8]">(mm)</span></label>
                   <Dropdown value={form.mainBarDia} onChange={(v) => set({ mainBarDia: v })} options={BAR_DIAS.map((d) => ({ value: String(d), label: `\u00d8${d}` }))} />
+                  <label className="mt-2 flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={!!form.autoBars} onChange={(e) => set({ autoBars: e.target.checked })} className="h-4 w-4 accent-[#0A2F44]" /><span>Let the engine choose the bar size</span></label>
+                    <p className={`mt-1 text-[10px] ${SUB}`}>{form.autoBars ? "Each standard size is designed in turn; the passing one with the least steel is used and every option is listed in the report. The bar above is ignored." : "Only this bar is used. If it cannot carry the load, the design fails and says so."}</p>
                 </div>
                 <div>
                   <label className={LABEL}>Concrete grade</label>

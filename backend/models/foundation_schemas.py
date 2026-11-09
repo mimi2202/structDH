@@ -86,6 +86,19 @@ class PadFoundationRequest(BaseModel):
 
     gamma_c: float = Field(1.5, gt=0)
     gamma_s: float = Field(1.15, gt=0)
+    # Reinforcement ratio limits from the page (Min/Max Reinf. Ratio). The
+    # engine never goes below EC2 9.2.1.1(1) or above 9.2.1.1(3) (0.04 Ac).
+    # Let the engine choose the bar size (column-page style): designed with each
+    # standard size, least steel among the passing designs. Off: the bar given only.
+    auto_bars: bool = False
+    min_reinf_ratio: float = Field(0.0013, ge=0, le=0.04)
+    max_reinf_ratio: float = Field(0.04, gt=0, le=0.08)
+    # Pedestal under the column(s): height 0 -> none. Plan size >= the column.
+    pedestal_height_mm: float = Field(0.0, ge=0)
+    pedestal_x_mm: float = Field(0.0, ge=0)
+    pedestal_y_mm: float = Field(0.0, ge=0)
+    # Water table depth below ground level (blank -> below the footing).
+    water_table_depth_m: Optional[float] = Field(None, ge=0)
 
     design_basis: FoundationDesignBasis = FoundationDesignBasis()
 
@@ -107,6 +120,27 @@ class PadFoundationRequest(BaseModel):
                 f"column outside the footing. Max offset: {(self.footing_length_mm - self.column_x_mm) / 2:.0f} mm "
                 f"along L, {(self.footing_width_mm - self.column_y_mm) / 2:.0f} mm along B."
             )
+        return self
+
+    @model_validator(mode="after")
+    def check_pedestal(self):
+        if self.pedestal_height_mm <= 0:
+            return self
+        cy = self.column_x_mm if getattr(self, "column_shape", "rectangular") == "circular" else self.column_y_mm
+        if self.pedestal_x_mm < self.column_x_mm or self.pedestal_y_mm < cy:
+            raise ValueError(
+                f"Pedestal ({self.pedestal_x_mm:.0f} x {self.pedestal_y_mm:.0f} mm) must be at least the column "
+                f"size ({self.column_x_mm:.0f} x {cy:.0f} mm). Enter the pedestal plan size, or set its height to 0.")
+        return self
+
+    @model_validator(mode="after")
+    def check_pedestal_fits(self):
+        if self.pedestal_height_mm > 0 and (
+                abs(self.column_offset_x_mm) + self.pedestal_x_mm / 2 > self.footing_length_mm / 2 + 0.5
+                or abs(self.column_offset_y_mm) + self.pedestal_y_mm / 2 > self.footing_width_mm / 2 + 0.5):
+            raise ValueError(
+                f"Pedestal ({self.pedestal_x_mm:.0f} x {self.pedestal_y_mm:.0f} mm) does not fit on the footing "
+                f"({self.footing_length_mm:.0f} x {self.footing_width_mm:.0f} mm) at this column position.")
         return self
 
     @model_validator(mode="after")
@@ -266,6 +300,7 @@ class PadFoundationResponse(BaseModel):
     soil_weight_kN: float = 0.0
     auto_sized: bool = False
     detailing: Optional[Dict[str, Any]] = None   # anchorage + bar schedule
+    bar_selection: Optional[Dict[str, Any]] = None   # set when auto_bars was on
     design_moments: DesignMomentsOut
     flexure: FlexureOut
     one_way_shear: OneWayShearOut
@@ -317,6 +352,19 @@ class CombinedFootingRequest(BaseModel):
     gamma_c: float = Field(1.5, gt=0)
     gamma_s: float = Field(1.15, gt=0)
     unit_weight_concrete: float = Field(25.0, gt=0)
+    # Reinforcement ratio limits from the page (Min/Max Reinf. Ratio). The
+    # engine never goes below EC2 9.2.1.1(1) or above 9.2.1.1(3) (0.04 Ac).
+    # Let the engine choose the bar size (column-page style): designed with each
+    # standard size, least steel among the passing designs. Off: the bar given only.
+    auto_bars: bool = False
+    min_reinf_ratio: float = Field(0.0013, ge=0, le=0.04)
+    max_reinf_ratio: float = Field(0.04, gt=0, le=0.08)
+    # Pedestal under the column(s): height 0 -> none. Plan size >= the column.
+    pedestal_height_mm: float = Field(0.0, ge=0)
+    pedestal_x_mm: float = Field(0.0, ge=0)
+    pedestal_y_mm: float = Field(0.0, ge=0)
+    # Water table depth below ground level (blank -> below the footing).
+    water_table_depth_m: Optional[float] = Field(None, ge=0)
     # Structville 8.5.4, as for the pad: ULS/SLS factor for columns with no
     # service load, soil on the footing, and sizing. With auto_size the
     # footing is placed on the load resultant (left_projection_m = the
@@ -345,6 +393,24 @@ class CombinedFootingRequest(BaseModel):
                 f"beyond the footing length of {self.footing_length_m:.3f} m. Increase the footing "
                 f"length or reduce the spacing/projection."
             )
+        return self
+
+    @model_validator(mode="after")
+    def check_pedestals(self):
+        if self.pedestal_height_mm <= 0:
+            return self
+        if self.pedestal_x_mm < self.column_x_mm or self.pedestal_y_mm < self.column_y_mm:
+            raise ValueError(
+                f"Pedestal ({self.pedestal_x_mm:.0f} x {self.pedestal_y_mm:.0f} mm) must be at least the column "
+                f"size ({self.column_x_mm:.0f} x {self.column_y_mm:.0f} mm). Enter the pedestal plan size, or set its height to 0.")
+        if self.pedestal_x_mm >= self.column_spacing_m * 1000:
+            raise ValueError(f"The two pedestals ({self.pedestal_x_mm:.0f} mm long) overlap at a column spacing of "
+                             f"{self.column_spacing_m * 1000:.0f} mm.")
+        if not self.auto_size and (self.pedestal_y_mm > self.footing_width_m * 1000
+                                   or self.pedestal_x_mm / 2000 > self.left_projection_m
+                                   or self.left_projection_m + self.column_spacing_m + self.pedestal_x_mm / 2000
+                                   > self.footing_length_m):
+            raise ValueError(f"Pedestal ({self.pedestal_x_mm:.0f} x {self.pedestal_y_mm:.0f} mm) does not fit on the footing.")
         return self
 
     @model_validator(mode="after")
@@ -481,6 +547,7 @@ class CombinedFootingResponse(BaseModel):
     sls_total_load_kN: float = 0.0
     auto_sized: bool = False
     detailing: Optional[Dict[str, Any]] = None   # anchorage + bar schedule
+    bar_selection: Optional[Dict[str, Any]] = None   # set when auto_bars was on
     left_projection_m: float = 0.0        # column 1 centre from the left edge
     right_projection_m: float = 0.0       # column 2 centre from the right edge
     moments: CombinedMomentsOut

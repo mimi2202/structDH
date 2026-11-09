@@ -75,6 +75,11 @@ class ContinuousBeamInput:
     bar_diameters: Optional[List[int]] = None   # user-preferred diameters, main bar first
     effective_depth_override_mm: Optional[float] = None   # if given, used directly for d_mm instead of deriving from cover/link/bar -- makes this a genuine design input, not display-only
     span_loads_override: list = None      # optional: explicit per-span factored UDL (kN/m); bypasses slab-area take-down
+    # Outer supports monolithic ("continuous" on the page): the ends are
+    # analysed fixed as well as pinned and each section takes the worse --
+    # end supports get the fixed-end hogging, spans keep the pinned-end
+    # sagging (full fixity is never relied on to reduce the span steel).
+    fixed_ends: bool = False
 
 
 def design_continuous_beam(d: ContinuousBeamInput) -> dict:
@@ -119,29 +124,43 @@ def design_continuous_beam(d: ContinuousBeamInput) -> dict:
     # --- FEM ---
     spans = d.spans_m
     n_nodes = len(spans) + 1
-    K = np.zeros((n_nodes, n_nodes))
-    F = np.zeros(n_nodes)
-    for e, (L, w) in enumerate(zip(spans, span_loads)):
-        k = (EI / L) * np.array([[4.0, 2.0], [2.0, 4.0]])
-        f = np.array([-w * L ** 2 / 12, w * L ** 2 / 12])
-        K[e:e + 2, e:e + 2] += k
-        F[e:e + 2] += f
-    theta = np.linalg.solve(K, F)
 
-    # --- member moments ---
-    end_moments = []
-    for e, (L, w) in enumerate(zip(spans, span_loads)):
-        k = (EI / L) * np.array([[4.0, 2.0], [2.0, 4.0]])
-        f = np.array([-w * L ** 2 / 12, w * L ** 2 / 12])
-        m = k @ theta[e:e + 2] - f
-        end_moments.append(m)
+    def member_end_moments(fixed: bool):
+        K = np.zeros((n_nodes, n_nodes))
+        F = np.zeros(n_nodes)
+        for e, (L, w) in enumerate(zip(spans, span_loads)):
+            k = (EI / L) * np.array([[4.0, 2.0], [2.0, 4.0]])
+            f = np.array([-w * L ** 2 / 12, w * L ** 2 / 12])
+            K[e:e + 2, e:e + 2] += k
+            F[e:e + 2] += f
+        if fixed:                       # theta = 0 at both outer supports
+            for i in (0, n_nodes - 1):
+                K[i, :] = 0.0
+                K[i, i] = 1.0
+                F[i] = 0.0
+        theta = np.linalg.solve(K, F)
+        out = []
+        for e, (L, w) in enumerate(zip(spans, span_loads)):
+            k = (EI / L) * np.array([[4.0, 2.0], [2.0, 4.0]])
+            f = np.array([-w * L ** 2 / 12, w * L ** 2 / 12])
+            out.append(k @ theta[e:e + 2] - f)
+        return out, theta
 
-    # support hogging = |right end moment| of each span except the last node's own
+    end_moments, theta = member_end_moments(False)      # theta: pinned-end rotations (report)
+    cases = [end_moments] + ([member_end_moments(True)[0]] if d.fixed_ends else [])
+    end_moments_fixed = cases[1] if d.fixed_ends else None
+
+    # support hogging = |right end moment| of each span except the last node's
+    # own; with fixed ends, the worse of the two analyses and the outer supports too
     support_moments = {}
+    if d.fixed_ends:
+        support_moments["S1"] = float(abs(end_moments_fixed[0][0]))
     for e in range(len(spans) - 1):
-        support_moments[f"S{e + 2}"] = float(abs(end_moments[e][1]))
+        support_moments[f"S{e + 2}"] = float(max(abs(c[e][1]) for c in cases))
+    if d.fixed_ends:
+        support_moments[f"S{len(spans) + 1}"] = float(abs(end_moments_fixed[-1][1]))
 
-    # span sagging from equilibrium
+    # span sagging from equilibrium (pinned-end analysis: the larger sagging)
     span_moments = {}
     span_details = []
     for e, (L, w, mp) in enumerate(zip(spans, span_loads, end_moments), start=1):
@@ -233,11 +252,16 @@ def design_continuous_beam(d: ContinuousBeamInput) -> dict:
     # --- shear ---
     shear = {}
     shear_ends = {}
-    for e, (L, w, mp) in enumerate(zip(spans, span_loads, end_moments), start=1):
-        M_left = -float(mp[0])
-        M_right = float(mp[1])
-        R_left = (w * L) / 2 + (M_right - M_left) / L
-        R_right = w * L - R_left
+    for e, (L, w) in enumerate(zip(spans, span_loads), start=1):
+        best = None
+        for c in cases:                 # worse end shear of the pinned / fixed analyses
+            M_left = -float(c[e - 1][0])
+            M_right = float(c[e - 1][1])
+            R_left = (w * L) / 2 + (M_right - M_left) / L
+            R_right = w * L - R_left
+            if best is None or max(abs(R_left), abs(R_right)) > max(abs(best[0]), abs(best[1])):
+                best = (R_left, R_right)
+        R_left, R_right = best
         shear[f"Span {e}"] = float(round(max(abs(R_left), abs(R_right)), 3))
         shear_ends[f"Span {e}"] = {"V_left_kN": round(float(R_left), 3),
                                    "V_right_kN": round(float(R_right), 3)}

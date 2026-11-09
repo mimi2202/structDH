@@ -352,6 +352,7 @@ class TwoWaySlabInput:
     gk_partition_kN_m2: Optional[float] = None
     qk_imposed_kN_m2: Optional[float] = None
     gk_self_kN_m2: Optional[float] = None
+    unit_weight_concrete: float = 25.0   # kN/m3, self-weight when gk_self is not given
     gk_services_kN_m2: Optional[float] = None
     main_bar_diameter_mm: Optional[int] = None
     candidate_bar_diameters_mm: Optional[List[int]] = None
@@ -617,7 +618,7 @@ class TwoWaySlabDesigner:
 
         res.aspect_ratio_r = self.input.ly_m / self.input.lx_m
 
-        res.gk_self_kN_m2 = self.input.gk_self_kN_m2 if self.input.gk_self_kN_m2 is not None else 25.0 * res.thickness_mm / 1000.0
+        res.gk_self_kN_m2 = self.input.gk_self_kN_m2 if self.input.gk_self_kN_m2 is not None else self.input.unit_weight_concrete * res.thickness_mm / 1000.0
         res.gk_finish_kN_m2 = self.input.gk_finish_kN_m2 if self.input.gk_finish_kN_m2 is not None else self.auto_finish_load()
         res.gk_partition_kN_m2 = self.input.gk_partition_kN_m2 if self.input.gk_partition_kN_m2 is not None else self.auto_partition_load()
         res.gk_services_kN_m2 = self.input.gk_services_kN_m2 if self.input.gk_services_kN_m2 is not None else self.auto_services_load()

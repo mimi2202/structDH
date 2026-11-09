@@ -121,6 +121,11 @@ class PadFoundationInput:
     gamma_c: float = 1.5
     gamma_s: float = 1.15
 
+    # Reinforcement ratio limits entered by the designer. As,min never goes
+    # below EC2 9.2.1.1(1) and As,max never above 9.2.1.1(3) (0.04 Ac).
+    rho_min: float = 0.0013
+    rho_max: float = 0.04
+
     # Service (SLS) column loads for the bearing check. None -> ULS used.
     service_axial_kN: Optional[float] = None
     service_moment_x_kNm: Optional[float] = None
@@ -138,6 +143,17 @@ class PadFoundationInput:
     soil_depth_above_mm: float = 0.0
     sls_factor: Optional[float] = None   # None -> ULS loads used for bearing
 
+    # Pedestal under the column (height 0 -> none). Rectangular, centred on
+    # the column; its weight is a permanent load on the footing (1.35 G at
+    # ULS) and the faces for bending / shear / punching move to it.
+    pedestal_height_mm: float = 0.0
+    pedestal_x_mm: float = 0.0
+    pedestal_y_mm: float = 0.0
+    # Water table depth below ground (None -> below the footing). Water
+    # above the base: buoyancy U = gamma_w h_w A on the SLS bearing load.
+    water_table_depth_m: Optional[float] = None
+    unit_weight_water: float = 9.81
+
 
 @dataclass
 class FlexuralResult:
@@ -151,6 +167,7 @@ class FlexuralResult:
     spacing_mm: float
     As_provided: float
     status: str
+    As_max: float = 0.0
 
 
 @dataclass
@@ -244,6 +261,13 @@ class PadFoundationResult:
     # face and d from the face, on the governing side of each direction
     face_x: Dict[str, float] = field(default_factory=dict)
     face_y: Dict[str, float] = field(default_factory=dict)
+    # pedestal and ground water (zeros when not entered)
+    pedestal_weight_kN: float = 0.0
+    punching_face: str = "column"        # "pedestal" when EC2 6.4.2(8) allows
+    water_head_m: float = 0.0
+    buoyancy_kN: float = 0.0
+    upl_stabilising_kN: float = 0.0      # 0.9 x (footing + soil + pedestal)
+    upl_status: str = "OK"               # warning only
 
 
 def _load_case(moment_x: float, moment_y: float) -> str:
@@ -271,12 +295,53 @@ def _geometry(d: PadFoundationInput):
 
 
 def _column_face(d: PadFoundationInput):
-    """Column plan size for bending / one-way shear: a circular column is
-    taken as the square of equal area."""
+    """Column plan size for bending / one-way shear: the pedestal when there
+    is one; a circular column is taken as the square of equal area."""
+    if _has_pedestal(d):
+        return d.pedestal_x_mm, d.pedestal_y_mm
     if d.column_shape == "circular":
         s = d.column_x_mm * math.sqrt(math.pi) / 2
         return s, s
     return d.column_x_mm, d.column_y_mm
+
+
+def _has_pedestal(d) -> bool:
+    return d.pedestal_height_mm > 0 and d.pedestal_x_mm > 0 and d.pedestal_y_mm > 0
+
+
+def _pedestal_weight(d) -> float:
+    """kN, characteristic."""
+    if not _has_pedestal(d):
+        return 0.0
+    return d.pedestal_x_mm * d.pedestal_y_mm * d.pedestal_height_mm / 1e9 * d.unit_weight_concrete
+
+
+def _N_uls(d) -> float:
+    """ULS axial on the footing: column + 1.35 x pedestal weight (EN 1990 Eq. 6.10)."""
+    return d.axial_load_kN + 1.35 * _pedestal_weight(d)
+
+
+def _punch_face(d):
+    """(cx, cy, circular, from) for punching. EC2 6.4.2(8): a pedestal with
+    l_H <= 2 h_H is a column head, so the control perimeters start at the
+    pedestal face. A wider, shallower pedestal is checked from the column
+    face with the footing d only (conservative: the pedestal depth is not
+    counted)."""
+    if _has_pedestal(d):
+        cy_col = d.column_x_mm if d.column_shape == "circular" else d.column_y_mm
+        l_H = max(d.pedestal_x_mm - d.column_x_mm, d.pedestal_y_mm - cy_col) / 2
+        if l_H <= 2 * d.pedestal_height_mm:
+            return d.pedestal_x_mm, d.pedestal_y_mm, False, "pedestal"
+    return d.column_x_mm, d.column_y_mm, d.column_shape == "circular", "column"
+
+
+def _water(d, L: float, B: float):
+    """(h_w m, U kN): water head above the base and the buoyancy on it."""
+    if d.water_table_depth_m is None:
+        return 0.0, 0.0
+    base = (d.soil_depth_above_mm + d.footing_depth_mm) / 1000
+    hw = max(base - d.water_table_depth_m, 0.0)
+    return hw, d.unit_weight_water * hw * L * B
 
 
 def _footing_moments(d: PadFoundationInput, N: float, Mx_col: float, My_col: float):
@@ -289,15 +354,16 @@ def _footing_moments(d: PadFoundationInput, N: float, Mx_col: float, My_col: flo
 
 
 def _eccentricity(d: PadFoundationInput, L: float, B: float):
-    Mx_t, My_t = _footing_moments(d, d.axial_load_kN, d.moment_x_kNm, d.moment_y_kNm)
-    ex = My_t / d.axial_load_kN if d.axial_load_kN != 0 else 0
-    ey = Mx_t / d.axial_load_kN if d.axial_load_kN != 0 else 0
+    N = _N_uls(d)
+    Mx_t, My_t = _footing_moments(d, N, d.moment_x_kNm, d.moment_y_kNm)
+    ex = My_t / N if N != 0 else 0
+    ey = Mx_t / N if N != 0 else 0
     return ex, ey, abs(ex) <= L / 6, abs(ey) <= B / 6
 
 
 def _soil_pressure_biaxial(d: PadFoundationInput, L: float, B: float, area: float,
                            ex: float, ey: float, N: Optional[float] = None):
-    q0 = (d.axial_load_kN if N is None else N) / area
+    q0 = (_N_uls(d) if N is None else N) / area
 
     q1 = q0 * (1 + 6 * ex / L + 6 * ey / B)
     q2 = q0 * (1 + 6 * ex / L - 6 * ey / B)
@@ -330,11 +396,22 @@ def _sls_loads(d: PadFoundationInput, L: float, B: float):
     Mx = d.moment_x_kNm / f if sls_from_uls or d.service_moment_x_kNm is None else d.service_moment_x_kNm
     My = d.moment_y_kNm / f if sls_from_uls or d.service_moment_y_kNm is None else d.service_moment_y_kNm
     W_f = L * B * d.footing_depth_mm / 1000 * d.unit_weight_concrete
-    cx, cy = _column_face(d)
-    W_s = max(L * B - cx * cy / 1e6, 0) * d.soil_depth_above_mm / 1000 * d.soil_unit_weight
-    N = P + W_f + W_s
-    # the offset moment comes from the column load only (W_f, W_s act at the centre)
-    Mx, My = _footing_moments(d, P, Mx, My)
+    hs = d.soil_depth_above_mm / 1000
+    if _has_pedestal(d):
+        # soil on the footing, less the pedestal (up to its height) and the column above it
+        A_col = (math.pi * d.column_x_mm ** 2 / 4 if d.column_shape == "circular"
+                 else d.column_x_mm * d.column_y_mm) / 1e6
+        hp = min(d.pedestal_height_mm / 1000, hs)
+        V_out = d.pedestal_x_mm * d.pedestal_y_mm / 1e6 * hp + A_col * (hs - hp)
+    else:
+        cx, cy = _column_face(d)
+        V_out = cx * cy / 1e6 * hs
+    W_s = max(L * B * hs - V_out, 0) * d.soil_unit_weight
+    W_p = _pedestal_weight(d)
+    _, U = _water(d, L, B)
+    N = P + W_f + W_s + W_p - U
+    # the offset moment comes from the column + pedestal (W_f, W_s, U act at the centre)
+    Mx, My = _footing_moments(d, P + W_p, Mx, My)
     return sls_from_uls, W_f, W_s, N, Mx, My, (My / N if N else 0.0), (Mx / N if N else 0.0)
 
 
@@ -383,7 +460,8 @@ def _flexural_reinforcement(d: PadFoundationInput, M_kNm_per_m: float,
     As_req = M_Nmm / (0.87 * fyk * z)
 
     fctm = _fctm(fck)
-    As_min = max(0.26 * fctm / fyk * b * d_eff, 0.0013 * b * d_eff)
+    As_min = max(0.26 * fctm / fyk * b * d_eff, max(0.0013, d.rho_min) * b * d_eff)
+    As_max = min(d.rho_max, 0.04) * b * d.footing_depth_mm      # EC2 9.2.1.1(3), Ac = b h
     As_design = max(As_req, As_min)
 
     area_one_bar = bar_area(d.bar_dia_mm)
@@ -393,12 +471,12 @@ def _flexural_reinforcement(d: PadFoundationInput, M_kNm_per_m: float,
         adopted_spacing = 75
     As_provided = area_one_bar * 1000 / adopted_spacing
 
-    status = "OK" if As_provided >= As_design else "NOT OK"
+    status = "OK" if As_design <= As_provided <= As_max else "NOT OK"
 
     return FlexuralResult(
         direction=direction, M_kNm_per_m=M_kNm_per_m, K=K, z_mm=z,
         As_req=As_req, As_min=As_min, As_design=As_design,
-        spacing_mm=adopted_spacing, As_provided=As_provided, status=status,
+        spacing_mm=adopted_spacing, As_provided=As_provided, status=status, As_max=As_max,
     )
 
 
@@ -426,14 +504,14 @@ def _punching_shear(d: PadFoundationInput, q_relief: float, effective_depth_mm: 
     """projection_*_mm: the shorter overhang each way, from the true column
     face (a control perimeter must lie on the footing)."""
     dm = effective_depth_mm / 1000
-    cx, cy = d.column_x_mm / 1000, d.column_y_mm / 1000
-    circular = d.column_shape == "circular"
+    pcx, pcy, circular, _ = _punch_face(d)
+    cx, cy = pcx / 1000, pcy / 1000
     a_fit = min(projection_x_mm, projection_y_mm) / 1000
     vRdc = _vrdc(d, effective_depth_mm, rho_l)
     fck = d.concrete_grade_fck
     vRdmax = 0.5 * 0.6 * (1 - fck / 250) * fck / d.gamma_c
     kx, ky = _k_table_6_1(cx / cy), _k_table_6_1(cy / cx)
-    P = d.axial_load_kN
+    P = _N_uls(d)
     Mx, My = (0.0, 0.0) if d.column_pinned else (d.moment_x_kNm, d.moment_y_kNm)
 
     def perimeter(a):
@@ -489,7 +567,7 @@ def design_pad_foundation(d: PadFoundationInput) -> PadFoundationResult:
     # ULS net pressure (column load only; the footing self-weight and its own
     # reaction cancel) drives the structural design.
     q0, qmax, qmin, corners, _, _ = _soil_pressure_biaxial(d, L, B, area, ex, ey)
-    Mx_t, My_t = _footing_moments(d, d.axial_load_kN, d.moment_x_kNm, d.moment_y_kNm)
+    Mx_t, My_t = _footing_moments(d, _N_uls(d), d.moment_x_kNm, d.moment_y_kNm)
     # SLS gross pressure (service loads + footing self-weight) for bearing / uplift.
     sls_from_uls, W_f, W_s, N_s, Mx_s, My_s, ex_s, ey_s = _sls_loads(d, L, B)
     q0_s, qmax_s, qmin_s, corners_s, bearing_status, uplift_status = _soil_pressure_biaxial(
@@ -510,8 +588,9 @@ def design_pad_foundation(d: PadFoundationInput) -> PadFoundationResult:
     rho_y = flex_y.As_provided / (1000 * d_eff_y)
     ox, oy = d.column_offset_x_mm / 1000, d.column_offset_y_mm / 1000
     q_col = q0 + My_t * ox / (B * L ** 3 / 12) + Mx_t * oy / (L * B ** 3 / 12)
-    cy_true = d.column_x_mm if d.column_shape == "circular" else d.column_y_mm
-    a_min_x = (d.footing_length_mm - d.column_x_mm) / 2 - abs(d.column_offset_x_mm)
+    pcx, pcy, p_circ, p_from = _punch_face(d)
+    cy_true = pcx if p_circ else pcy
+    a_min_x = (d.footing_length_mm - pcx) / 2 - abs(d.column_offset_x_mm)
     a_min_y = (d.footing_width_mm - cy_true) / 2 - abs(d.column_offset_y_mm)
     punching = _punching_shear(d, q_col, (d_eff_x + d_eff_y) / 2, math.sqrt(rho_x * rho_y),
                                a_min_x, a_min_y)
@@ -521,6 +600,9 @@ def design_pad_foundation(d: PadFoundationInput) -> PadFoundationResult:
     checks = [uplift_status, flex_x.status, flex_y.status,
              shear_x.status, shear_y.status, punching.status]
     overall = "PASS" if all(c == "OK" for c in checks) else "FAIL"
+    W_p = _pedestal_weight(d)
+    hw, U = _water(d, L, B)
+    upl_stb = 0.9 * (W_f + W_s + W_p)     # EN 1997-1 2.4.7.4, column load ignored
 
     return PadFoundationResult(
         L_m=L, B_m=B, area_m2=area, projection_x_mm=projection_x, projection_y_mm=projection_y,
@@ -538,6 +620,8 @@ def design_pad_foundation(d: PadFoundationInput) -> PadFoundationResult:
         Mx_total_kNm=Mx_t, My_total_kNm=My_t,
         projection_x_min_mm=a_min_x, projection_y_min_mm=a_min_y,
         soil_weight_kN=W_s, face_x=face_x, face_y=face_y,
+        pedestal_weight_kN=W_p, punching_face=p_from, water_head_m=hw, buoyancy_kN=U,
+        upl_stabilising_kN=upl_stb, upl_status="OK" if U <= upl_stb else "NOT OK",
     )
 
 def size_pad_foundation(d: PadFoundationInput, max_depth_mm: float = 2000,
@@ -554,12 +638,14 @@ def size_pad_foundation(d: PadFoundationInput, max_depth_mm: float = 2000,
     steps = []
     while True:
         w = d.unit_weight_concrete * h / 1000 + d.soil_unit_weight * d.soil_depth_above_mm / 1000
+        if d.water_table_depth_m is not None:   # buoyancy per m2 of base
+            w -= d.unit_weight_water * max((d.soil_depth_above_mm + h) / 1000 - d.water_table_depth_m, 0.0)
         q_net = d.allowable_bearing_kN_m2 - w
         if q_net <= 0:
             raise ValueError(f"Allowable bearing {d.allowable_bearing_kN_m2:.0f} kN/m2 is used up by the footing "
                              f"and soil weight ({w:.1f} kN/m2) at h = {h:.0f} mm: no footing size works.")
         f = d.sls_factor if d.service_axial_kN is None and d.sls_factor else 1.0
-        P = d.axial_load_kN / f if d.service_axial_kN is None else d.service_axial_kN
+        P = (d.axial_load_kN / f if d.service_axial_kN is None else d.service_axial_kN) + _pedestal_weight(d)
         A_req = P / q_net
         B_mm = max(math.ceil(math.sqrt(A_req / ratio) * 10 - 1e-9) * 100, cy + 200)
         L_of = lambda b: max(math.ceil(ratio * b / 100 - 1e-9) * 100, cx + 200)

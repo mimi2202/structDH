@@ -56,6 +56,9 @@ class ContinuousBeamRequest(BaseModel):
     end_support: str = "simple"            # simple | continuous
     design_params: CBDesignParams = CBDesignParams()
     bar_diameters: Optional[List[int]] = Field([16, 20, 25, 32])
+    # Let the engine choose the bar size (column-page style): designed with each
+    # standard size, least steel among the passing designs. Off: the bar given only.
+    auto_bars: bool = False
     link_diameter: int = 8
     region: str = "Nigeria"
     design_basis: BeamDesignBasis = BeamDesignBasis()
@@ -124,9 +127,11 @@ class CBSLS(BaseModel):
     deflection_actual: float
     deflection_limit: float
     deflection_status: str
-    crack_width: float
+    crack_width: Optional[float] = None   # not calculated: EC2 7.3.3 tables are used instead
     crack_limit: float
     crack_status: str
+    crack_ratio: float = 0.0              # governing min(phi/phi_max, s/s_max)
+    crack_method: str = "EC2 7.3.3, Tables 7.2N / 7.3N"
 
 
 class CBReaction(BaseModel):
@@ -181,3 +186,4 @@ class ContinuousBeamResult(BaseModel):
     report: List[ReportSection]
     warnings: List[str]
     notes: List[str]
+    bar_selection: Optional[Dict] = None   # set when auto_bars was on

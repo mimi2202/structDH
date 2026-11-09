@@ -12,7 +12,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useDesignMeta } from '../../contexts/DesignMetaContext';
 
 const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisMethod, concreteGrade, steelGrade }) => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { isDarkMode, toggleDarkMode } = useTheme();
   const { designMeta } = useDesignMeta();
   const navigate = useNavigate();
@@ -54,11 +54,6 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
       return user.name.split(' ').map(n => n[0]).join('').toUpperCase();
     }
     return 'JE';
-  };
-
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login');
   };
 
   const handleBack = () => {
@@ -284,16 +279,20 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
                 <span className="font-medium text-[#02090d] dark:text-white">Units:</span>
                 <span className="text-[#6b7280] dark:text-[#9ca3af]">kN, mm, m</span>
               </div>
-              <div className="w-px h-3 bg-[#e5e7eb] dark:bg-[#374151]"></div>
-              <div className="flex items-center space-x-2">
-                <span className="font-medium text-[#02090d] dark:text-white">Concrete:</span>
-                <span className="text-[#6b7280] dark:text-[#9ca3af]">{effectiveConcreteGrade}</span>
-              </div>
-              <div className="w-px h-3 bg-[#e5e7eb] dark:bg-[#374151]"></div>
-              <div className="flex items-center space-x-2">
-                <span className="font-medium text-[#02090d] dark:text-white">Steel:</span>
-                <span className="text-[#6b7280] dark:text-[#9ca3af]">{effectiveSteelGrade}</span>
-              </div>
+              {effectiveConcreteGrade && <>
+                <div className="w-px h-3 bg-[#e5e7eb] dark:bg-[#374151]"></div>
+                <div className="flex items-center space-x-2">
+                  <span className="font-medium text-[#02090d] dark:text-white">Concrete:</span>
+                  <span className="text-[#6b7280] dark:text-[#9ca3af]">{effectiveConcreteGrade}</span>
+                </div>
+              </>}
+              {effectiveSteelGrade && <>
+                <div className="w-px h-3 bg-[#e5e7eb] dark:bg-[#374151]"></div>
+                <div className="flex items-center space-x-2">
+                  <span className="font-medium text-[#02090d] dark:text-white">Steel:</span>
+                  <span className="text-[#6b7280] dark:text-[#9ca3af]">{effectiveSteelGrade}</span>
+                </div>
+              </>}
             </div>
           </div>
         </div>

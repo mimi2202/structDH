@@ -41,11 +41,6 @@ const SUPPORTS = [
   { value: "one_fixed_one_free", label: "One End Fixed, One Free", glyph: "cantilever" },
   { value: "both_ends_simply_supported", label: "Both Ends Simply Supported", glyph: "pin_pin" },
 ];
-const TOP_RESTRAINTS = [
-  { value: "continuous", label: "Continuous", note: "Beam is continuous with slab over supports." },
-  { value: "one_end_discontinuous", label: "One End Discontinuous", note: "Slab is continuous on one end only." },
-  { value: "both_ends_discontinuous", label: "Both Ends Discontinuous", note: "Slab is discontinuous on both ends." },
-];
 // end_support in ContinuousBeamRequest: "simple" | "continuous"
 const END_SUPPORTS = [
   { value: "simple", label: "Simple (Pinned) End Supports", note: "No hogging restraint at the two outer supports.", glyph: "pin_pin" },
@@ -69,10 +64,6 @@ const ec2Draft = (defaults, saved) => {
   }
   return d;
 };
-const ANALYSIS_METHODS = [
-  { value: "Linear Elastic", label: "Linear Elastic" },
-  { value: "Redistributed", label: "Linear Elastic + Redistribution" },
-];
 const CONCRETE_EC = [
   { value: "C25/30", label: "C25/30 (fck = 25 MPa)" },
   { value: "C30/37", label: "C30/37 (fck = 30 MPa)" },
@@ -111,11 +102,11 @@ const DEFAULTS = {
   beamId: "B1",
   designCode: "EC2",
   supportCondition: "both_ends_simply_supported",
-  topRestraint: "continuous",
   span: "6000", width: "300", depth: "500", effectiveCover: "25",
   leftAdjacentSpacing: "0", rightAdjacentSpacing: "0", slabThickness: "0",
   concreteGrade: "C25/30", steelGrade: "B500",
-  unitWeightConcrete: "25", unitWeightSteel: "78.5",
+  unitWeightConcrete: "25",
+  mainBarDia: "16", autoBars: false,
   selfWeightAuto: true,
   wallLoad: "10", finishes: "1.5", additionalDeadLoad: "1.2",
   liveLoad: "3", otherLiveLoad: "2",
@@ -126,7 +117,6 @@ const DEFAULTS = {
 const CB_DEFAULTS = {
   beamId: "CB1",
   designCode: "EC2",
-  analysisMethod: "Linear Elastic",
   nSpans: 3,
   spanLengths: ["5000", "6000", "5000", "5000", "5000", "5000", "5000", "5000"],
   width: "300",
@@ -137,7 +127,6 @@ const CB_DEFAULTS = {
   concreteGrade: "C25/30",
   steelGrade: "B500",
   unitWeightConcrete: "25",
-  unitWeightSteel: "78.5",
   selfWeightAuto: true,
   wallLoad: "10",
   finishes: "1.5",
@@ -146,11 +135,10 @@ const CB_DEFAULTS = {
   otherLiveLoad: "2",
   perSpanLoads: false,
   spanLoads: [],           // [{ index, wall_load, finishes, ... }] built on demand
-  mainBarDia: "16",
+  mainBarDia: "16", autoBars: false,
   linkDiameter: "8",
   workingLife: "50",
   exposureClass: "XC1",
-  crackedSectionSls: true,
   region: "Nigeria",
   ...DESIGN_BASIS_DEFAULTS,
 };
@@ -219,11 +207,6 @@ const BeamInput = () => {
   const activeSpans = c.spanLengths.slice(0, c.nSpans);
   const totalLength = activeSpans.reduce((a, v) => a + (parseFloat(v) || 0), 0);
 
-  // Chosen bar first, remaining offered diameters after it as fallbacks.
-  const barOrder = (() => {
-    const chosen = parseInt(c.mainBarDia, 10);
-    return [chosen, ...BEAM_BARS.filter((b) => b !== chosen)];
-  })();
 
   const setSpanCount = (n) => {
     const next = Math.min(MAX_SPANS, Math.max(MIN_SPANS, n));
@@ -278,7 +261,6 @@ const BeamInput = () => {
     return {
       beam_id: c.beamId,
       design_code: c.designCode,
-      analysis_method: c.analysisMethod,
       geometry: {
         n_spans: c.nSpans,
         span_lengths: activeSpans.map((v) => num(v)),
@@ -291,7 +273,6 @@ const BeamInput = () => {
         concrete_grade: c.concreteGrade,
         steel_grade: c.steelGrade,
         unit_weight_concrete: num(c.unitWeightConcrete, 25),
-        unit_weight_steel: num(c.unitWeightSteel, 78.5),
       },
       loads: {
         self_weight_auto: !!c.selfWeightAuto,
@@ -306,11 +287,10 @@ const BeamInput = () => {
       design_params: {
         design_working_life: parseInt(c.workingLife, 10) || 50,
         exposure_class: c.exposureClass,
-        cracked_section_sls: !!c.crackedSectionSls,
       },
-      bar_diameters: barOrder,
+      bar_diameters: [parseInt(c.mainBarDia, 10) || 16],
+      auto_bars: !!c.autoBars,
       link_diameter: parseInt(c.linkDiameter, 10) || 8,
-      region: c.region,
       design_basis: {
         designer_name: (c.designerName || "").trim() || null,
         designer_qualifications: (c.designerQualifications || "").trim() || null,
@@ -427,11 +407,7 @@ const BeamInput = () => {
                   </div>
                   <div>
                     <label className={LABEL}>Analysis Method</label>
-                    <Dropdown value={c.analysisMethod} onChange={(e) => setCb({ analysisMethod: e.target.value })} options={ANALYSIS_METHODS} />
-                  </div>
-                  <div>
-                    <label className={LABEL}>Region</label>
-                    <input className={INPUT} value={c.region} onChange={(e) => setCb({ region: e.target.value })} />
+                    <div className={`${INPUT} flex items-center`}>Linear elastic (FEM)</div>
                   </div>
                 </div>
               </Section>
@@ -495,7 +471,6 @@ const BeamInput = () => {
                   <div><label className={LABEL}>Concrete Grade</label><Dropdown value={c.concreteGrade} onChange={(e) => setCb({ concreteGrade: e.target.value })} options={cConcreteOpts} /></div>
                   <div><label className={LABEL}>Steel Grade</label><Dropdown value={c.steelGrade} onChange={(e) => setCb({ steelGrade: e.target.value })} options={cSteelOpts} /></div>
                   <Field label="Unit Weight of Concrete" unit="kN/m³" value={c.unitWeightConcrete} onChange={(v) => setCb({ unitWeightConcrete: v })} step="0.5" />
-                  <Field label="Unit Weight of Steel" unit="kN/m³" value={c.unitWeightSteel} onChange={(v) => setCb({ unitWeightSteel: v })} step="0.5" />
                 </div>
               </Section>
 
@@ -583,7 +558,8 @@ const BeamInput = () => {
                       onChange={(e) => setCb({ mainBarDia: e.target.value })}
                       options={BEAM_BARS.map((b) => ({ value: String(b), label: `\u00d8${b}` }))}
                     />
-                    <p className={`mt-1 text-[10px] ${SUB}`}>Tried first; {barOrder.slice(1).map((b) => `\u00d8${b}`).join(", ")} used as fallbacks in that order.</p>
+                    <label className="mt-2 flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={!!c.autoBars} onChange={(e) => setCb({ autoBars: e.target.checked })} className="h-4 w-4 accent-[#0A2F44]" /><span>Let the engine choose the bar size</span></label>
+                    <p className={`mt-1 text-[10px] ${SUB}`}>{c.autoBars ? "Each standard size is designed in turn; the passing one with the least steel is used and every option is listed in the report. The bar above is ignored." : "Only this bar is used. If it cannot carry the load, the design fails and says so."}</p>
                   </div>
                   <div>
                     <label className={LABEL}>Link &Oslash; <span className="text-[#94a3b8]">(mm)</span></label>
@@ -596,13 +572,6 @@ const BeamInput = () => {
                   <div>
                     <label className={LABEL}>Design Working Life</label>
                     <Dropdown value={c.workingLife} onChange={(e) => setCb({ workingLife: e.target.value })} options={WORKING_LIVES} />
-                  </div>
-                  <div>
-                    <label className={LABEL}>Cracked Section (SLS)</label>
-                    <div className="flex h-[42px] items-center justify-between rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-3">
-                      <span className={`text-xs ${SUB}`}>Use cracked stiffness</span>
-                      <Toggle checked={c.crackedSectionSls} onChange={(v) => setCb({ crackedSectionSls: v })} />
-                    </div>
                   </div>
                 </div>
               </Section>
@@ -666,16 +635,6 @@ const BeamInput = () => {
                     <SelectCard key={s.value} selected={f.supportCondition === s.value} onClick={() => set({ supportCondition: s.value })} label={s.label} glyph={<BeamGlyph kind={s.glyph} />} />
                   ))}
                 </div>
-                <p className={`mb-2 mt-5 text-xs font-semibold ${SUB}`}>2.2 Slab Continuity (Top Restraint)</p>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  {TOP_RESTRAINTS.map((r) => (
-                    <SelectCard key={r.value} selected={f.topRestraint === r.value} onClick={() => set({ topRestraint: r.value })} label={r.label} sub={r.note} glyph={<RestraintGlyph value={r.value} />} />
-                  ))}
-                </div>
-                <div className="mt-3 flex items-start gap-2 rounded-lg border-l-4 border-[#0A2F44] bg-[#e6f0f5] dark:bg-[#1e3a4a] p-3">
-                  <FiInfo className="mt-0.5 flex-shrink-0 text-[#0A2F44] dark:text-[#cce1eb]" />
-                  <p className="text-xs text-[#0A2F44] dark:text-[#cce1eb]">Top restraint from continuous slab affects negative moment capacity and deflection.</p>
-                </div>
               </Section>
 
               {/* 3. GEOMETRY */}
@@ -700,7 +659,13 @@ const BeamInput = () => {
                   <div><label className={LABEL}>Concrete Grade</label><Dropdown value={f.concreteGrade} onChange={(e) => set({ concreteGrade: e.target.value })} options={concreteOpts} /></div>
                   <div><label className={LABEL}>Steel Grade</label><Dropdown value={f.steelGrade} onChange={(e) => set({ steelGrade: e.target.value })} options={steelOpts} /></div>
                   <Field label="Unit Weight of Concrete" unit="kN/m³" value={f.unitWeightConcrete} onChange={(v) => set({ unitWeightConcrete: v })} step="0.5" />
-                  <Field label="Unit Weight of Steel" unit="kN/m³" value={f.unitWeightSteel} onChange={(v) => set({ unitWeightSteel: v })} step="0.5" />
+                  <div>
+                    <label className={LABEL}>Main Bar &Oslash; <span className="text-[#94a3b8]">(mm)</span></label>
+                    <Dropdown value={f.mainBarDia || "16"} onChange={(e) => set({ mainBarDia: e.target.value })}
+                      options={BEAM_BARS.map((b) => ({ value: String(b), label: `\u00d8${b}` }))} />
+                    <label className="mt-2 flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={!!f.autoBars} onChange={(e) => set({ autoBars: e.target.checked })} className="h-4 w-4 accent-[#0A2F44]" /><span>Let the engine choose the bar size</span></label>
+                    <p className={`mt-1 text-[10px] ${SUB}`}>{f.autoBars ? "Each standard size is designed in turn; the passing one with the least steel is used and every option is listed in the report. The bar above is ignored." : "Only this bar is used. If it cannot carry the load, the design fails and says so."}</p>
+                  </div>
                 </div>
               </Section>
 
@@ -755,7 +720,6 @@ const BeamInput = () => {
                   <div className="space-y-1.5">
                     <SumRow label="Beam Name / ID" value={f.beamId} />
                     <SumRow label="Support Condition" value={supportLabel} />
-                    <SumRow label="Slab Continuity" value={TOP_RESTRAINTS.find((r) => r.value === f.topRestraint)?.label} />
                     <SumRow label="Span (L)" value={`${f.span} mm`} />
                     <SumRow label="Width (b)" value={`${f.width} mm`} />
                     <SumRow label="Overall Depth (D)" value={`${f.depth} mm`} />
@@ -958,17 +922,6 @@ function BeamGlyph({ kind }) {
       {kind === "fixed_pin" && (<>{fixed(20)}<path d={pin(88)} fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1.4" /></>)}
       {kind === "cantilever" && (<>{fixed(20)}<line x1="90" y1="22" x2="100" y2="22" stroke="currentColor" strokeWidth="2" /></>)}
       {kind === "pin_pin" && (<><path d={pin(22)} fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1.4" /><path d={pin(88)} fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1.4" /></>)}
-    </svg>
-  );
-}
-function RestraintGlyph({ value }) {
-  const tri = (x) => <path d={`M${x},26 l-6,9 h12 z`} fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1.2" />;
-  return (
-    <svg viewBox="0 0 120 44" className="h-9 w-full">
-      <line x1="14" y1="14" x2="106" y2="14" stroke="currentColor" strokeWidth={value === "continuous" ? 2.4 : 1} strokeDasharray={value === "continuous" ? "0" : "4 2"} />
-      <rect x="14" y="22" width="92" height="6" fill="currentColor" fillOpacity="0.12" stroke="currentColor" strokeWidth="1.4" />
-      {tri(30)}{tri(90)}
-      {value === "one_end_discontinuous" && <line x1="14" y1="14" x2="40" y2="14" stroke="currentColor" strokeWidth="2.4" strokeDasharray="0" />}
     </svg>
   );
 }

@@ -98,6 +98,9 @@ class SlabDesignRequest(BaseModel):
     loads: LoadInput
     design_params: DesignParameters
     bar_diameters: Optional[List[int]] = Field([10, 12, 16], description="Bar diameters to try in mm")
+    # Let the engine choose the bar size (column-page style): designed with each
+    # standard size, least steel among the passing designs. Off: the bar given only.
+    auto_bars: bool = False
     thickness_options: Optional[List[float]] = Field(None, description="Alternative thicknesses to try in mm")
     use_ai: bool = Field(False, description="Enable AI recommendation")
     region: str = Field("UK", description="Region for cost rates")
@@ -256,6 +259,7 @@ class SlabDesignResult(BaseModel):
     cost_breakdown: CostBreakdown
     optimization_options: List[OptimizationOption]
     report: List[ReportSection] = []
+    bar_selection: Optional[Dict] = None   # set when auto_bars was on
 
 class TaskStatusResponse(BaseModel):
     task_id: str
@@ -281,6 +285,9 @@ class ContinuousSlabRequest(BaseModel):
     loads: LoadInput
     design_params: DesignParameters
     bar_diameters: Optional[List[int]] = Field([10, 12, 16])
+    # Let the engine choose the bar size (column-page style): designed with each
+    # standard size, least steel among the passing designs. Off: the bar given only.
+    auto_bars: bool = False
     region: str = Field("UK")
     occupancy: Optional[str] = None   # sets psi_2 for the crack check; None = not stated (psi_2 = 0.6 assumed)
     design_basis: SlabDesignBasis = SlabDesignBasis()
@@ -375,3 +382,4 @@ class ContinuousSlabResult(BaseModel):
     cost_breakdown: CostBreakdown
     diagram: DiagramOut
     report: List[ReportSection] = []
+    bar_selection: Optional[Dict] = None   # set when auto_bars was on

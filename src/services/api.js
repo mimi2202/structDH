@@ -76,14 +76,10 @@ export const slabAPI = {
         design_code: formData.designCode,
         analysis_method: formData.analysisMethod,
         exposure_class: formData.exposureClass,
-        fire_rating: parseInt(formData.fireRating),
-        crack_width_limit: parseFloat(formData.crackWidthLimit),
-        deflection_limit: parseInt(formData.deflectionLimit)
       },
-      bar_diameters: (() => {
-        const main = parseInt(formData.mainBarDia) || 12;
-        return [main, ...[10, 12, 16, 20].filter((d) => d !== main)];
-      })(),
+      // the chosen bar only (no silent fallback); auto_bars lets the engine choose
+      bar_diameters: [parseInt(formData.mainBarDia) || 12],
+      auto_bars: !!formData.autoBars,
       use_ai: false,
       region: "Nigeria",
       building_use: formData.buildingUse || "office",
@@ -151,7 +147,6 @@ export const beamAPI = {
       beam_id: formData.beamId || "B1",
       design_code: formData.designCode,
       support_condition: formData.supportCondition,
-      top_restraint: formData.topRestraint,
       geometry: {
         span: parseFloat(formData.span),
         width: parseFloat(formData.width),
@@ -165,7 +160,6 @@ export const beamAPI = {
         concrete_grade: formData.concreteGrade,
         steel_grade: formData.steelGrade,
         unit_weight_concrete: parseFloat(formData.unitWeightConcrete),
-        unit_weight_steel: parseFloat(formData.unitWeightSteel),
       },
       loads: {
         self_weight_auto: !!formData.selfWeightAuto,
@@ -175,7 +169,9 @@ export const beamAPI = {
         live_load: parseFloat(formData.liveLoad) || 0,
         other_live_load: parseFloat(formData.otherLiveLoad) || 0,
       },
-      bar_diameters: formData.barDiameters || [16, 20, 25, 32],
+      // the chosen main bar only (no silent fallback); auto_bars lets the engine choose
+      bar_diameters: [parseInt(formData.mainBarDia) || 16],
+      auto_bars: !!formData.autoBars,
       link_diameter: parseInt(formData.linkDiameter) || 8,
       region: formData.region || "Nigeria",
       design_basis: {
@@ -309,13 +305,14 @@ export const continuousSlabAPI = {
         // 0 min is a real choice ("no fire check"), so don't let || turn it into 60
         fire_rating: Number.isNaN(parseInt(form.fireRating)) ? 60 : parseInt(form.fireRating),
         crack_width_limit: parseFloat(form.crackWidthLimit) || 0.3,
-        deflection_limit: parseInt(form.deflectionLimit) || 250,
       },
-      bar_diameters: form.barDiameters || [10, 12, 16],
+      // the chosen main bar (main_bar_dia was sent but is not a request field,
+      // so the engine always tried 10 mm first); auto_bars lets the engine choose
+      bar_diameters: [parseInt(form.mainBarDia) || 12],
+      auto_bars: !!form.autoBars,
       cover_tolerance: parseFloat(form.coverTolerance) || 5,
       // "Custom" ("") means occupancy not stated -> backend assumes psi_2 = 0.6
       occupancy: form.occupancy || null,
-      main_bar_dia: parseInt(form.mainBarDia) || 12,
       region: form.region || "Nigeria",
       design_basis: {
         designer_name: (form.designerName || "").trim() || null,

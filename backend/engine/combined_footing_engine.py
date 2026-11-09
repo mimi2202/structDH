@@ -105,6 +105,18 @@ class CombinedPadInput:
     P1_sls_kN: Optional[float] = None
     P2_sls_kN: Optional[float] = None
     unit_weight_concrete: float = 25.0
+    # Reinforcement ratio limits entered by the designer, bounded by EC2
+    # 9.2.1.1(1) (As,min) and 9.2.1.1(3) (As,max = 0.04 Ac).
+    rho_min: float = 0.0013
+    rho_max: float = 0.04
+    # Pedestal under each column (height 0 -> none), same size for both,
+    # and water table depth below ground (None -> below the footing); as
+    # in the pad engine.
+    pedestal_height_mm: float = 0.0
+    pedestal_x_mm: float = 0.0
+    pedestal_y_mm: float = 0.0
+    water_table_depth_m: Optional[float] = None
+    unit_weight_water: float = 9.81
 
     # Structville 8.5.4: soil/surcharge on the footing (bearing only) and the
     # ULS/SLS factor used when no service loads are given (None -> ULS used)
@@ -125,6 +137,7 @@ class FlexuralResult:
     spacing_mm: float
     As_provided: float
     status: str
+    As_max: float = 0.0
 
 
 @dataclass
@@ -244,6 +257,13 @@ class CombinedFootingResult:
 
     overall_status: str
     soil_weight_kN: float = 0.0
+    # pedestal and ground water (zeros when not entered)
+    pedestal_weight_kN: float = 0.0      # each column
+    punching_face: str = "column"
+    water_head_m: float = 0.0
+    buoyancy_kN: float = 0.0
+    upl_stabilising_kN: float = 0.0
+    upl_status: str = "OK"               # warning only
 
 
 def _classify_load_case(d: CombinedPadInput) -> str:
@@ -302,6 +322,33 @@ def _bearing_pressure_biaxial(d: CombinedPadInput, total_load, Mx_total, My_tota
     return area, q0, qmax, qmin, corners, bearing_status, uplift_status
 
 
+def _has_pedestal(d) -> bool:
+    return d.pedestal_height_mm > 0 and d.pedestal_x_mm > 0 and d.pedestal_y_mm > 0
+
+
+def _pedestal_weight(d) -> float:
+    """kN per column, characteristic."""
+    if not _has_pedestal(d):
+        return 0.0
+    return d.pedestal_x_mm * d.pedestal_y_mm * d.pedestal_height_mm / 1e9 * d.unit_weight_concrete
+
+
+def _pedestal_punches(d) -> bool:
+    """EC2 6.4.2(8): l_H <= 2 h_H -> control perimeters from the pedestal face;
+    otherwise from the column face with the footing d (conservative)."""
+    l_H = max(d.pedestal_x_mm - d.column_x_mm, d.pedestal_y_mm - d.column_y_mm) / 2
+    return _has_pedestal(d) and l_H <= 2 * d.pedestal_height_mm
+
+
+def _water(d):
+    """(h_w m, U kN): water head above the base and the buoyancy on it."""
+    if d.water_table_depth_m is None:
+        return 0.0, 0.0
+    base = (d.soil_depth_above_mm + d.footing_depth_mm) / 1000
+    hw = max(base - d.water_table_depth_m, 0.0)
+    return hw, d.unit_weight_water * hw * d.footing_length_m * d.footing_width_m
+
+
 def _sls_loads(d: CombinedPadInput, x1, x2, centre_x):
     """SLS loads on the soil for the bearing check: service column loads (ULS
     if not given) plus the footing self-weight, which acts at the centre.
@@ -315,9 +362,19 @@ def _sls_loads(d: CombinedPadInput, x1, x2, centre_x):
     r1 = P1s / d.P1_kN if d.P1_kN else 1.0
     r2 = P2s / d.P2_kN if d.P2_kN else 1.0
     W_f = d.footing_length_m * d.footing_width_m * d.footing_depth_mm / 1000 * d.unit_weight_concrete
-    A_cols = 2 * d.column_x_mm * d.column_y_mm / 1e6
-    W_s = max(d.footing_length_m * d.footing_width_m - A_cols, 0) * d.soil_depth_above_mm / 1000 * d.soil_unit_weight
-    N = P1s + P2s + W_f + W_s
+    hs = d.soil_depth_above_mm / 1000
+    A_col = d.column_x_mm * d.column_y_mm / 1e6
+    if _has_pedestal(d):
+        # soil displaced by the pedestals (up to their height) and the columns above
+        hp = min(d.pedestal_height_mm / 1000, hs)
+        V_out = 2 * (d.pedestal_x_mm * d.pedestal_y_mm / 1e6 * hp + A_col * (hs - hp))
+    else:
+        V_out = 2 * A_col * hs
+    W_s = max(d.footing_length_m * d.footing_width_m * hs - V_out, 0) * d.soil_unit_weight
+    W_p = _pedestal_weight(d)
+    P1s, P2s = P1s + W_p, P2s + W_p      # pedestals act at the columns
+    _, U = _water(d)
+    N = P1s + P2s + W_f + W_s - U
     My = P1s * (x1 - centre_x) + P2s * (x2 - centre_x) + r1 * d.P1_My_kNm + r2 * d.P2_My_kNm
     Mx = r1 * d.P1_Mx_kNm + r2 * d.P2_Mx_kNm
     return sls_from_uls, W_f, W_s, N, My, Mx, (My / N if N else 0.0), (Mx / N if N else 0.0)
@@ -409,7 +466,8 @@ def _flexural_design(d: CombinedPadInput, M_kNm: float, b_mm: float, d_eff_mm: f
     per_m = 1000 / b_mm if b_mm else 1.0
     As_req = M_Nmm / (0.87 * d.fyk * z) * per_m if z else 0.0
     fctm = _fctm(d.fck)
-    As_min = max(0.26 * fctm / d.fyk * 1000 * d_eff_mm, 0.0013 * 1000 * d_eff_mm)   # EC2 9.2.1.1
+    As_min = max(0.26 * fctm / d.fyk * 1000 * d_eff_mm, max(0.0013, d.rho_min) * 1000 * d_eff_mm)   # EC2 9.2.1.1
+    As_max = min(d.rho_max, 0.04) * 1000 * d.footing_depth_mm      # EC2 9.2.1.1(3), Ac = b h
     As_design = max(As_req, As_min)
 
     Abar = bar_area(d.bar_dia_mm)
@@ -420,9 +478,10 @@ def _flexural_design(d: CombinedPadInput, M_kNm: float, b_mm: float, d_eff_mm: f
     As_prov = Abar * 1000 / spacing_adopted
 
     # K > K' = 0.167 (no redistribution) would need compression steel: deepen the footing.
-    status = "OK" if (As_prov >= As_design and K <= 0.167) else "NOT OK"
+    status = "OK" if (As_design <= As_prov <= As_max and K <= 0.167) else "NOT OK"
     return FlexuralResult(label=label, M_kNm=abs(M_kNm), K=K, z_mm=z, As_req=As_req, As_min=As_min,
-                          As_design=As_design, spacing_mm=spacing_adopted, As_provided=As_prov, status=status)
+                          As_design=As_design, spacing_mm=spacing_adopted, As_provided=As_prov, status=status,
+                          As_max=As_max)
 
 
 def _transverse_moment_design(d: CombinedPadInput, qmax) -> Tuple[float, float]:
@@ -531,6 +590,16 @@ def _punching_shear_check(d: CombinedPadInput, q0, My_total, d_eff_mm, rho_l, x1
 
 
 def design_combined_footing(d: CombinedPadInput) -> CombinedFootingResult:
+    # Pedestals: 1.35 x weight on each column at ULS (EN 1990 Eq. 6.10) and
+    # the faces for bending / shear move to the pedestal; SLS from the
+    # entered loads (d_in) in _sls_loads.
+    d_in = d
+    W_p = _pedestal_weight(d_in)
+    if _has_pedestal(d_in):
+        d = replace(d_in, P1_kN=d_in.P1_kN + 1.35 * W_p, P2_kN=d_in.P2_kN + 1.35 * W_p,
+                    column_x_mm=d_in.pedestal_x_mm, column_y_mm=d_in.pedestal_y_mm)
+    d_punch = d if (_pedestal_punches(d_in) or not _has_pedestal(d_in)) else replace(
+        d, column_x_mm=d_in.column_x_mm, column_y_mm=d_in.column_y_mm)
     case_type = _classify_load_case(d)
     total_load, x1, x2, centre_x, centre_y, x_resultant, axial_ecc_x = _resultant_load(d)
     Mx_total, My_total, ex, ey = _total_design_moments_about_centre(d, total_load, x1, x2, centre_x)
@@ -539,7 +608,7 @@ def design_combined_footing(d: CombinedPadInput) -> CombinedFootingResult:
     area, q0, qmax, qmin, corners, _, _ = _bearing_pressure_biaxial(
         d, total_load, Mx_total, My_total, ex, ey)
     # SLS gross pressure (service loads + footing self-weight) for bearing / uplift.
-    sls_from_uls, W_f, W_s, N_s, My_s, Mx_s, ex_s, ey_s = _sls_loads(d, x1, x2, centre_x)
+    sls_from_uls, W_f, W_s, N_s, My_s, Mx_s, ex_s, ey_s = _sls_loads(d_in, x1, x2, centre_x)
     _, q0_s, qmax_s, qmin_s, corners_s, bearing_status, uplift_status = _bearing_pressure_biaxial(
         d, N_s, Mx_s, My_s, ex_s, ey_s)
     left_proj, spacing, right_proj = _footing_projections(d, x1, x2)
@@ -557,7 +626,7 @@ def design_combined_footing(d: CombinedPadInput) -> CombinedFootingResult:
     rho_trans = trans_flex.As_provided / (1000 * d_trans)
     shear = _one_way_shear_check(d, an, d_long, x1, x2, rho_bot, rho_top)
     # EC2 6.4.2(1)/6.4.4(1): d_eff = (d_y + d_z)/2, rho_l = sqrt(rho_ly rho_lz) of the bottom steel
-    punching = _punching_shear_check(d, q0, My_total, (d_long + d_trans) / 2,
+    punching = _punching_shear_check(d_punch, q0, My_total, (d_long + d_trans) / 2,
                                      math.sqrt(rho_bot * rho_trans), x1, x2)
 
     ex_ok = abs(ex_s) <= d.footing_length_m / 6
@@ -568,6 +637,8 @@ def design_combined_footing(d: CombinedPadInput) -> CombinedFootingResult:
     checks = [uplift_status, long_flex.status, long_top_flex.status, trans_flex.status,
               shear.status, punching.status]
     overall = "PASS" if all(c == "OK" for c in checks) else "FAIL"
+    hw, U = _water(d_in)
+    upl_stb = 0.9 * (W_f + W_s + 2 * W_p)     # EN 1997-1 2.4.7.4, column loads ignored
 
     return CombinedFootingResult(
         case_type=case_type, total_load_kN=total_load, x1_m=x1, x2_m=x2,
@@ -586,6 +657,9 @@ def design_combined_footing(d: CombinedPadInput) -> CombinedFootingResult:
         d_long_mm=d_long, d_trans_mm=d_trans,
         long_flex=long_flex, long_top_flex=long_top_flex, trans_flex=trans_flex, M_trans_kNm=M_trans, projection_y_m=projection_y,
         shear=shear, punching=punching, overall_status=overall, soil_weight_kN=W_s,
+        pedestal_weight_kN=W_p, punching_face="pedestal" if _pedestal_punches(d_in) else "column",
+        water_head_m=hw, buoyancy_kN=U, upl_stabilising_kN=upl_stb,
+        upl_status="OK" if U <= upl_stb else "NOT OK",
     )
 
 def size_combined_footing(d: CombinedPadInput, max_depth_mm: float = 2000,
@@ -598,10 +672,14 @@ def size_combined_footing(d: CombinedPadInput, max_depth_mm: float = 2000,
     P1s = d.P1_kN / f if d.P1_sls_kN is None else d.P1_sls_kN
     P2s = d.P2_kN / f if d.P2_sls_kN is None else d.P2_sls_kN
     r1, r2 = P1s / d.P1_kN, P2s / d.P2_kN
+    W_p = _pedestal_weight(d)
+    P1s, P2s = P1s + W_p, P2s + W_p
+    face_x = d.pedestal_x_mm if _has_pedestal(d) else d.column_x_mm
+    face_y = d.pedestal_y_mm if _has_pedestal(d) else d.column_y_mm
     s = d.column_spacing_m
     # resultant of the service column loads from column 1 (column My shift it)
     x_bar = (P2s * s + r1 * d.P1_My_kNm + r2 * d.P2_My_kNm) / (P1s + P2s)
-    p_min = max(d.left_projection_m, d.column_x_mm / 2000)
+    p_min = max(d.left_projection_m, face_x / 2000)
     # p1 + x_bar = L/2 = p2 + (s - x_bar); round the longer overhang to 10 mm
     extra = math.ceil(abs(2 * x_bar - s) * 100 - 1e-9) / 100
     p1, p2 = (p_min, p_min + extra) if 2 * x_bar >= s else (p_min + extra, p_min)
@@ -611,12 +689,14 @@ def size_combined_footing(d: CombinedPadInput, max_depth_mm: float = 2000,
     steps = []
     while True:
         w = d.unit_weight_concrete * h / 1000 + d.soil_unit_weight * d.soil_depth_above_mm / 1000
+        if d.water_table_depth_m is not None:   # buoyancy per m2 of base
+            w -= d.unit_weight_water * max((d.soil_depth_above_mm + h) / 1000 - d.water_table_depth_m, 0.0)
         q_net = d.allowable_bearing_kN_m2 - w
         if q_net <= 0:
             raise ValueError(f"Allowable bearing {d.allowable_bearing_kN_m2:.0f} kN/m2 is used up by the footing "
                              f"and soil weight ({w:.1f} kN/m2) at h = {h:.0f} mm: no footing size works.")
         A_req = (P1s + P2s) / q_net
-        B = math.ceil(max(A_req / L, d.column_y_mm / 1000 + 0.2) * 10 - 1e-9) / 10
+        B = math.ceil(max(A_req / L, face_y / 1000 + 0.2) * 10 - 1e-9) / 10
         B_first = B
         while True:
             trial = replace(d, footing_length_m=L, footing_width_m=round(B, 1),

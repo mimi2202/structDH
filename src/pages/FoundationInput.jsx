@@ -26,30 +26,11 @@ const FOUNDATION_TYPES = [
 ];
 const COL_SHAPES = ["Rectangular", "Circular"];
 const FOOTING_SHAPES = ["Square", "Rectangular"];
-const SOIL_TYPES = ["Medium Dense Sand", "Dense Sand", "Loose Sand", "Stiff Clay", "Firm Clay", "Soft Clay", "Rock"];
 const CONCRETE = ["C20/25", "C25/30", "C30/37", "C35/45", "C40/50"];
 const STEEL = ["B500", "B500B", "B460"];
 const BAR_DIAS = [10, 12, 16, 20, 25];
 const FIXITY = ["Fixed", "Pinned"];
 // EN 1997-1 Annex A partial factors per design approach (recommended values).
-const DESIGN_APPROACHES = {
-  "DA1 - Combination 1": {
-    sets: "A1 + M1 + R1",
-    text: "Loads factored up (γG = 1.35, γQ = 1.5); soil strength and bearing resistance not factored (γφ' = γc' = γR = 1.0). Factors the loads, so it usually governs the structural design of the footing (bending, shear, punching).",
-  },
-  "DA1 - Combination 2": {
-    sets: "A2 + M2 + R1",
-    text: "Loads barely factored (γG = 1.0, γQ = 1.3); soil strength reduced instead (tan φ' / 1.25, c' / 1.25, cu / 1.4), bearing resistance γR = 1.0. Factors the soil, so it usually governs the footing size (geotechnical bearing). DA1 means checking both combinations and taking the worse; this is the UK National Annex choice.",
-  },
-  "DA2": {
-    sets: "A1 + M1 + R2",
-    text: "Loads factored up (γG = 1.35, γQ = 1.5); soil strength not factored; the calculated bearing resistance is divided by γR,v = 1.4. One combination covers both the structure and the soil.",
-  },
-  "DA3": {
-    sets: "A1 (structural) / A2 (geotechnical) + M2 + R3",
-    text: "Column loads factored up (γG = 1.35, γQ = 1.5), loads coming from the soil itself at 1.0 / 1.3; soil strength reduced (tan φ' / 1.25, c' / 1.25, cu / 1.4); resistance γR = 1.0.",
-  },
-};
 
 const DEFAULTS = {
   foundation_type: "pad",
@@ -60,16 +41,16 @@ const DEFAULTS = {
   column_location: "Interior", offset_x_mm: "0", offset_y_mm: "0", fixity: "Fixed",
   // footing geometry
   footing_shape: "Square", footing_length_mm: "2000", footing_width_mm: "2000",
-  footing_depth_mm: "500", pedestal_height_mm: "0", pedestal_size_mm: "0",
+  footing_depth_mm: "500", pedestal_height_mm: "0", pedestal_x_mm: "600", pedestal_y_mm: "600",
   depth_below_ground_mm: "1200",
   // size L x B from the bearing pressure and deepen h (trial depth) until all checks pass
   auto_size: false,
   // soil & ground (display-only except allowable bearing)
-  soil_type: "Medium Dense Sand", allowable_bearing_kN_m2: "200",
-  unit_weight_soil: "18.0", ground_level_m: "0.00", water_table_m: "5.00",
+  allowable_bearing_kN_m2: "200",
+  unit_weight_soil: "18.0", water_table_m: "5.00",
   // materials
   concrete_grade_fck: "C25/30", steel_grade_fyk: "B500",
-  cover_mm: "50", bar_dia_mm: "16",
+  cover_mm: "50", bar_dia_mm: "16", autoBars: false,
   // detailing / bar schedule (Structville 9.10, 10.2)
   n_members: "1", starter_bar_count: "4", starter_bar_dia_mm: "16", starter_projection_mm: "",
   // loads — service + ultimate (engine uses ultimate)
@@ -78,10 +59,7 @@ const DEFAULTS = {
   sls_factor: "1.36",
   ultimate_vertical_kN: "750", ultimate_mx: "15", ultimate_my: "7.5",
   // design & checks (display-only)
-  design_approach: "DA1 - Combination 1", analysis_method: "Rigid (Base Pressure)",
-  eccentricity_check: true, punching_check: true,
   min_reinf_ratio: "0.0013", max_reinf_ratio: "0.04",
-  notes: "",
   // Printed on the first page of the Detailed Report. Blank stays blank.
   designer_name: "", designer_qualifications: "",
   checked_by: "", checker_qualifications: "",
@@ -143,6 +121,25 @@ const shapeFix = (f) => {
 const DRAFT_KEY = "foundationInputDraft";
 
 const gradeNum = (g) => parseFloat(String(g).replace(/[^0-9]/g, "").slice(0, 2)) || 25;
+// Steel: the 3-digit yield strength ("B460" -> 460). gradeNum took the first two
+// digits, so B460 became 46 and fell back to 500.
+const steelNum = (g) => parseFloat((String(g).match(/\d{3}/) || [])[0]) || 500;
+// Pedestal (height 0 -> none) and water table (blank -> below the footing)
+const groundFields = (f) => {
+  const hp = parseFloat(f.pedestal_height_mm) > 0 ? parseFloat(f.pedestal_height_mm) : 0;
+  const wt = parseFloat(f.water_table_m);
+  return {
+    pedestal_height_mm: hp,
+    pedestal_x_mm: hp ? parseFloat(f.pedestal_x_mm) || 0 : 0,
+    pedestal_y_mm: hp ? parseFloat(f.pedestal_y_mm) || 0 : 0,
+    water_table_depth_m: String(f.water_table_m ?? "").trim() !== "" && wt >= 0 ? wt : null,
+  };
+};
+// Min/Max Reinf. Ratio from the Design & Check card (engine bounds them by EC2 9.2.1.1)
+const ratioFields = (f) => ({
+  min_reinf_ratio: parseFloat(f.min_reinf_ratio) >= 0 ? parseFloat(f.min_reinf_ratio) : 0.0013,
+  max_reinf_ratio: parseFloat(f.max_reinf_ratio) > 0 ? parseFloat(f.max_reinf_ratio) : 0.04,
+});
 
 export default function FoundationInput() {
   const navigate = useNavigate();
@@ -205,7 +202,7 @@ export default function FoundationInput() {
           column_x_mm: num(form.column_x_mm),
           column_y_mm: num(form.column_y_mm),
           concrete_grade_fck: gradeNum(form.concrete_grade_fck),
-          steel_grade_fyk: gradeNum(form.steel_grade_fyk) < 100 ? 500 : gradeNum(form.steel_grade_fyk),
+          steel_grade_fyk: steelNum(form.steel_grade_fyk),
           allowable_bearing_kN_m2: num(form.allowable_bearing_kN_m2),
           cover_mm: num(form.cover_mm),
           bar_dia_mm: num(form.bar_dia_mm),
@@ -214,11 +211,14 @@ export default function FoundationInput() {
           soil_depth_above_mm: Math.max((num(form.depth_below_ground_mm) || 0) - (num(form.footing_depth_mm) || 0), 0),
           auto_size: !!form.auto_size,
         ...detailingFields(form),
+        ...ratioFields(form),
+        ...groundFields(form),
+        auto_bars: !!form.autoBars,
           design_basis: designBasisPayload(),
         });
         setBusy(false);
         navigate("/foundation-results", { state: { designResult: result, meta: {
-          project: form.project, location: form.location, soil_type: form.soil_type,
+          project: form.project, location: form.location,
           concrete_grade: form.concrete_grade_fck, steel_grade: form.steel_grade_fyk,
         } } });
       } catch (e) {
@@ -248,7 +248,7 @@ export default function FoundationInput() {
         column_offset_y_mm: num(form.offset_y_mm) || 0,
         column_fixity: form.fixity === "Pinned" ? "pinned" : "fixed",
         concrete_grade_fck: gradeNum(form.concrete_grade_fck),
-        steel_grade_fyk: gradeNum(form.steel_grade_fyk) < 100 ? 500 : gradeNum(form.steel_grade_fyk),
+        steel_grade_fyk: steelNum(form.steel_grade_fyk),
         allowable_bearing_kN_m2: num(form.allowable_bearing_kN_m2),
         cover_mm: num(form.cover_mm),
         bar_dia_mm: num(form.bar_dia_mm),
@@ -263,14 +263,17 @@ export default function FoundationInput() {
         soil_depth_above_mm: Math.max((num(form.depth_below_ground_mm) || 0) - (num(form.footing_depth_mm) || 0), 0),
         auto_size: !!form.auto_size,
         ...detailingFields(form),
+        ...ratioFields(form),
+        ...groundFields(form),
+        auto_bars: !!form.autoBars,
         design_basis: designBasisPayload(),
         // pass-through display context (not used by engine calc)
-        _meta: { project: form.project, location: form.location, soil_type: form.soil_type,
+        _meta: { project: form.project, location: form.location,
                  footing_shape: footingShape, column_shape: form.column_shape },
       });
       setBusy(false);
       navigate("/foundation-results", { state: { designResult: result, meta: {
-        project: form.project, location: form.location, soil_type: form.soil_type,
+        project: form.project, location: form.location,
         concrete_grade: form.concrete_grade_fck, steel_grade: form.steel_grade_fyk,
       } } });
     } catch (e) {
@@ -281,7 +284,7 @@ export default function FoundationInput() {
     }
   };
 
-  const steelK = gradeNum(form.steel_grade_fyk) < 100 ? 500 : gradeNum(form.steel_grade_fyk);
+  const steelK = steelNum(form.steel_grade_fyk);
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#111827]">
@@ -370,8 +373,12 @@ export default function FoundationInput() {
                 <Num label="Length (B × L)" unit="mm" value={form.footing_length_mm} onChange={(v) => set({ footing_length_mm: v })} live />
                 <Num label="Width" unit="mm" value={form.footing_width_mm} onChange={(v) => set({ footing_width_mm: v })} live />
                 <Num label="Thickness (h)" unit="mm" value={form.footing_depth_mm} onChange={(v) => set({ footing_depth_mm: v })} live />
-                <Num label="Pedestal Height" unit="mm" value={form.pedestal_height_mm} onChange={(v) => set({ pedestal_height_mm: v })} />
-                <Num label="Depth Below Ground" unit="mm" value={form.depth_below_ground_mm} onChange={(v) => set({ depth_below_ground_mm: v })} />
+                <Num label="Pedestal Height (0 = none)" unit="mm" value={form.pedestal_height_mm} onChange={(v) => set({ pedestal_height_mm: v })} live />
+                {parseFloat(form.pedestal_height_mm) > 0 && <>
+                  <Num label="Pedestal along L" unit="mm" value={form.pedestal_x_mm} onChange={(v) => set({ pedestal_x_mm: v })} live />
+                  <Num label="Pedestal along B" unit="mm" value={form.pedestal_y_mm} onChange={(v) => set({ pedestal_y_mm: v })} live />
+                </>}
+                <Num label="Depth Below Ground" unit="mm" value={form.depth_below_ground_mm} onChange={(v) => set({ depth_below_ground_mm: v })} live />
               </div>
               <label className="mt-3 flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={!!form.auto_size} onChange={(e) => set({ auto_size: e.target.checked })} className="h-4 w-4 accent-[#0A2F44]" /><span className={MAIN}>Size the footing for me</span></label>
               <p className={`mt-1 text-xs ${SUB}`}>
@@ -396,11 +403,9 @@ export default function FoundationInput() {
             {/* 3. Soil & Ground */}
             <Card n={3} title="Soil & Ground Conditions">
               <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-5 gap-4">
-                <div><label className={LABEL}>Soil Type</label><Dropdown value={form.soil_type} onChange={(v) => set({ soil_type: v })} options={SOIL_TYPES} /></div>
                 <Num label="Net Allowable Bearing" unit="kN/m²" value={form.allowable_bearing_kN_m2} onChange={(v) => set({ allowable_bearing_kN_m2: v })} live />
-                <Num label="Unit Weight of Soil" unit="kN/m³" value={form.unit_weight_soil} onChange={(v) => set({ unit_weight_soil: v })} />
-                <Num label="Ground Level" unit="m" value={form.ground_level_m} onChange={(v) => set({ ground_level_m: v })} />
-                <Num label="Water Table Depth" unit="m" value={form.water_table_m} onChange={(v) => set({ water_table_m: v })} />
+                <Num label="Unit Weight of Soil" unit="kN/m³" value={form.unit_weight_soil} onChange={(v) => set({ unit_weight_soil: v })} live />
+                <Num label="Water Table Depth below ground (blank = below footing)" unit="m" value={form.water_table_m} onChange={(v) => set({ water_table_m: v })} live />
               </div>
             </Card>
 
@@ -410,7 +415,9 @@ export default function FoundationInput() {
                 <div><label className={LABEL}>Concrete Grade</label><Dropdown value={form.concrete_grade_fck} onChange={(v) => set({ concrete_grade_fck: v })} options={CONCRETE} /></div>
                 <div><label className={LABEL}>Steel Grade</label><Dropdown value={form.steel_grade_fyk} onChange={(v) => set({ steel_grade_fyk: v })} options={STEEL} /></div>
                 <Num label="Cover" unit="mm" value={form.cover_mm} onChange={(v) => set({ cover_mm: v })} live />
-                <div><label className={LABEL}>Bar Dia (mm)</label><Dropdown value={form.bar_dia_mm} onChange={(v) => set({ bar_dia_mm: v })} options={BAR_DIAS} /></div>
+                <div><label className={LABEL}>Bar Dia (mm)</label><Dropdown value={form.bar_dia_mm} onChange={(v) => set({ bar_dia_mm: v })} options={BAR_DIAS} />
+                  <label className="mt-2 flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={!!form.autoBars} onChange={(e) => set({ autoBars: e.target.checked })} className="h-4 w-4 accent-[#0A2F44]" /><span>Let the engine choose the bar size</span></label>
+                    <p className={`mt-1 text-[10px] ${SUB}`}>{form.autoBars ? "Each standard size is designed in turn; the passing one with the least steel is used and every option is listed in the report. The bar above is ignored." : "Only this bar is used. If it cannot carry the load, the design fails and says so."}</p></div>
               </div>
               <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Num label="Identical footings (schedule)" value={form.n_members} onChange={(v) => set({ n_members: v })} />
@@ -498,34 +505,16 @@ export default function FoundationInput() {
             {/* 6. Design & Checks */}
             <Card n={6} title="Design & Check Settings">
               <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-                <div><label className={LABEL}>Design Approach</label><Dropdown value={form.design_approach} onChange={(v) => set({ design_approach: v })} options={["DA1 - Combination 1", "DA1 - Combination 2", "DA2", "DA3"]} /></div>
-                <div><label className={LABEL}>Analysis Method</label><Dropdown value={form.analysis_method} onChange={(v) => set({ analysis_method: v })} options={["Rigid (Base Pressure)", "Flexible (Winkler)"]} /></div>
-                <Num label="Min Reinf. Ratio" value={form.min_reinf_ratio} onChange={(v) => set({ min_reinf_ratio: v })} />
-                <Num label="Max Reinf. Ratio" value={form.max_reinf_ratio} onChange={(v) => set({ max_reinf_ratio: v })} />
+                <div><label className={LABEL}>Analysis Method</label><div className={`${INPUT} bg-[#f8fafc] dark:bg-[#111827]`}>Rigid footing, linear base pressure</div></div>
+                <Num label="Min Reinf. Ratio" value={form.min_reinf_ratio} onChange={(v) => set({ min_reinf_ratio: v })} live />
+                <Num label="Max Reinf. Ratio" value={form.max_reinf_ratio} onChange={(v) => set({ max_reinf_ratio: v })} live />
               </div>
-              <div className="mt-3 flex gap-4">
-                <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={form.eccentricity_check} onChange={(e) => set({ eccentricity_check: e.target.checked })} className="h-4 w-4 accent-[#0A2F44]" /><span className={MAIN}>Eccentricity check</span></label>
-                <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={form.punching_check} onChange={(e) => set({ punching_check: e.target.checked })} className="h-4 w-4 accent-[#0A2F44]" /><span className={MAIN}>Punching check</span></label>
-              </div>
-              {DESIGN_APPROACHES[form.design_approach] && (
-                <div className="mt-4 flex items-start gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] bg-[#f8fafc] dark:bg-[#111827] p-3">
-                  <FiInfo className="mt-0.5 flex-shrink-0 text-[#0A2F44] dark:text-[#66a4c2]" />
-                  <div className="text-xs">
-                    <p className={`font-semibold ${MAIN}`}>{form.design_approach} · {DESIGN_APPROACHES[form.design_approach].sets}</p>
-                    <p className={`mt-1 ${SUB}`}>{DESIGN_APPROACHES[form.design_approach].text}</p>
-                    <p className={`mt-1 ${SUB}`}>Sets: A = actions (loads), M = soil strength, R = resistance. This app checks bearing against the allowable bearing pressure you enter, which already contains the soil's safety margin, so it uses the service loads and the design approach is recorded, not calculated. The structural design uses the ULS loads you enter.</p>
-                  </div>
-                </div>
-              )}
+              <p className={`mt-3 text-xs ${SUB}`}>Eccentricity (middle third), bearing, uplift, flexure, one-way shear and punching are always checked.</p>
+              <p className={`mt-2 text-xs ${SUB}`}>Bearing is checked on the service loads against the allowable bearing pressure you enter, which already contains the soil's safety margin (EN 1997-1 prescriptive method); the structural design uses the ULS loads.</p>
             </Card>
 
-            {/* 7. Notes */}
-            <Card n={7} title="Notes & Attachments" optional>
-              <textarea rows={3} className={INPUT} value={form.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="Any notes or additional information…" />
-            </Card>
-
-            {/* 8. Design Basis */}
-            <Card n={8} title="Design Basis" optional>
+            {/* 7. Design Basis */}
+            <Card n={7} title="Design Basis" optional>
               <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
                 <div><label className={LABEL}>Designed by</label>
                   <input className={INPUT} value={form.designer_name} onChange={(e) => set({ designer_name: e.target.value })} /></div>
@@ -581,7 +570,6 @@ export default function FoundationInput() {
                 <Sum label="Column" value={circular ? `Ø${form.column_x_mm} mm` : `${form.column_x_mm}×${form.column_y_mm} mm`} />
                 <Sum label="Footing" value={`${form.footing_length_mm}×${form.footing_width_mm}×${form.footing_depth_mm}`} />
                 <div className="my-2 border-t border-[#e2e8f0] dark:border-[#334155]" />
-                <Sum label="Soil type" value={form.soil_type} />
                 <Sum label="Allow. bearing" value={`${form.allowable_bearing_kN_m2} kN/m²`} />
                 <div className="my-2 border-t border-[#e2e8f0] dark:border-[#334155]" />
                 <Sum label="Concrete / Steel" value={`${form.concrete_grade_fck} · ${form.steel_grade_fyk}`} />
@@ -603,7 +591,7 @@ export default function FoundationInput() {
               <div className="px-5 pb-5">
                 <div className="flex items-center gap-2 rounded-lg bg-[#f0fdf4] dark:bg-[#052e16] p-3">
                   <FiCheckCircle className="text-green-600 dark:text-green-400 flex-shrink-0" size={15} />
-                  <p className="text-xs text-green-700 dark:text-green-300">Engine uses fck={gradeNum(form.concrete_grade_fck)}, fyk={steelK}. Extra fields are recorded, not calculated.</p>
+                  <p className="text-xs text-green-700 dark:text-green-300">Engine uses fck={gradeNum(form.concrete_grade_fck)}, fyk={steelK}. Every field on this page is used in the calculation.</p>
                 </div>
               </div>
             </div>

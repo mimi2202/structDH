@@ -50,7 +50,62 @@ def _design_basis_rows(db):
     ]
 
 
+def _pedestal_water_rows(d, res, n_ped: int = 1) -> list:
+    """Report rows for the pedestal(s) and the water table (none when neither
+    is entered)."""
+    R = lambda ref, calc, out: {"ref": ref, "calc": calc, "out": out}
+    rows = []
+    if d.pedestal_height_mm > 0:
+        each = " each" if n_ped > 1 else ""
+        rows += [
+            R("Pedestal weight", f"W_p = {d.pedestal_x_mm:.0f} x {d.pedestal_y_mm:.0f} x {d.pedestal_height_mm:.0f} mm x 25 kN/m3{each}; "
+                                 f"ULS adds 1.35 W_p at the column (EN 1990 Eq. 6.10), SLS adds W_p",
+              f"W_p = {res.pedestal_weight_kN:.2f} kN{each}"),
+            R("Pedestal faces", "bending and one-way shear at the pedestal face; punching "
+              + ("from the pedestal face (l_H <= 2 h_H: column head, EC2 6.4.2(8))" if res.punching_face == "pedestal"
+                 else "from the column face with the footing d only (l_H > 2 h_H; conservative, EC2 6.4.2(8)-(11))"),
+              f"punching from {res.punching_face}"),
+        ]
+    if d.water_table_depth_m is not None:
+        rows.append(R("Water table (buoyancy)", f"z_w = {d.water_table_depth_m:.2f} m below ground, base at "
+                      f"{(d.soil_depth_above_mm + d.footing_depth_mm) / 1000:.3f} m: h_w = {res.water_head_m:.3f} m; "
+                      f"U = 9.81 h_w A", f"U = {res.buoyancy_kN:.2f} kN"))
+        if res.buoyancy_kN > 0:
+            rows.append(R("Uplift (UPL, EN 1997-1 2.4.7.4) - warning only",
+                          f"0.9 x (W_f + W_s + W_p) = {res.upl_stabilising_kN:.2f} kN >= 1.0 U = {res.buoyancy_kN:.2f} kN "
+                          f"(column loads ignored)", res.upl_status))
+    return rows
+
+
+def _steel_limit_rows(d, flex) -> list:
+    """As,min and As,max rows with the designer's ratios (Min/Max Reinf. Ratio
+    on the page), bounded by EC2 9.2.1.1(1) and 9.2.1.1(3)."""
+    R = lambda ref, calc, out: {"ref": ref, "calc": calc, "out": out}
+    rmin = max(0.0013, d.min_reinf_ratio)
+    rmax = min(0.04, d.max_reinf_ratio)
+    note_min = (f"entered {d.min_reinf_ratio:.4f} < EC2 floor 0.0013, floor used"
+                if d.min_reinf_ratio < 0.0013 else f"rho_min = {rmin:.4f} (as entered)")
+    note_max = (f"entered {d.max_reinf_ratio:.4f} > EC2 limit 0.04, 0.04 used"
+                if d.max_reinf_ratio > 0.04 else f"rho_max = {rmax:.4f} (as entered)")
+    return [
+        R("Minimum steel (EC2 9.2.1.1(1))",
+          f"As,min = max(0.26 fctm/fyk b d, rho_min b d), fctm = 0.30 fck^(2/3) (EC2 Table 3.1); {note_min}",
+          f"As,min = {flex.As_min:.2f} mm2/m"),
+        R("Maximum steel (EC2 9.2.1.1(3))", f"As,max = rho_max b h; {note_max}",
+          f"As,max = {flex.As_max:.0f} mm2/m"),
+    ]
+
+
 def calculate_pad_foundation(request: PadFoundationRequest) -> PadFoundationResponse:
+    """Bar size: the one given or, with auto_bars, the passing standard size
+    with the least scheduled steel (services/bar_selection.py)."""
+    from services import bar_selection
+    return bar_selection.run(
+        request, _calculate_pad_foundation, lambda dia: {"bar_dia_mm": dia}, [12, 16, 20, 25],
+        lambda r: r.status, lambda r: r.detailing["summary"]["total_mass_kg"], "scheduled steel (kg)")
+
+
+def _calculate_pad_foundation(request: PadFoundationRequest) -> PadFoundationResponse:
     inp = PadFoundationInput(
         axial_load_kN=request.axial_load_kN,
         moment_x_kNm=request.moment_x_kNm,
@@ -77,6 +132,12 @@ def calculate_pad_foundation(request: PadFoundationRequest) -> PadFoundationResp
         sls_factor=request.sls_factor,
         soil_unit_weight=request.soil_unit_weight_kN_m3,
         soil_depth_above_mm=request.soil_depth_above_mm,
+        rho_min=request.min_reinf_ratio,
+        rho_max=request.max_reinf_ratio,
+        pedestal_height_mm=request.pedestal_height_mm,
+        pedestal_x_mm=request.pedestal_x_mm,
+        pedestal_y_mm=request.pedestal_y_mm,
+        water_table_depth_m=request.water_table_depth_m,
     )
 
     steps = None
@@ -237,9 +298,9 @@ def _build_report(request: PadFoundationRequest, res, steps=None) -> list:
         R("Axial load", f"NEd = {d.axial_load_kN:.3f} kN", f"{d.axial_load_kN:.3f} kN"),
         R("Moment about x-axis", f"Mx = {d.moment_x_kNm:.3f} kNm", f"{d.moment_x_kNm:.3f} kNm"),
         R("Moment about y-axis", f"My = {d.moment_y_kNm:.3f} kNm", f"{d.moment_y_kNm:.3f} kNm"),
-        R("Service (SLS) loads", (f"N = {res.sls_total_load_kN - res.footing_weight_kN - res.soil_weight_kN:.3f} kN, Mx = {res.sls_Mx_kNm:.3f}, "
+        R("Service (SLS) loads", (f"N = {res.sls_total_load_kN - res.footing_weight_kN - res.soil_weight_kN - res.pedestal_weight_kN + res.buoyancy_kN:.3f} kN, Mx = {res.sls_Mx_kNm:.3f}, "
                                   f"My = {res.sls_My_kNm:.3f} kNm" if not res.sls_from_uls else
-                                  f"not entered -- SLS = ULS / {d.sls_factor:.2f} (Structville 8.5.1)" if d.sls_factor else
+                                  f"not entered -- SLS = ULS / {d.sls_factor:.2f} (assumed ratio of EN 1990 Eq. 6.10 ULS to Eq. 6.14b characteristic loads)" if d.sls_factor else
                                   "not entered -- the ULS loads are used for bearing (conservative)"),
           "bearing check"),
         R("Load case", "classified from Mx, My", res.load_case),
@@ -255,12 +316,17 @@ def _build_report(request: PadFoundationRequest, res, steps=None) -> list:
         R("Soil", f"Allowable bearing = {d.allowable_bearing_kN_m2:.1f} kN/m2, soil on footing "
                   f"h_s = {d.soil_depth_above_mm:.0f} mm at {d.soil_unit_weight_kN_m3:.1f} kN/m3", "adopted"),
         R("Detailing", f"Cover = {d.cover_mm:.0f} mm, main bar = Y{d.bar_dia_mm:.0f}", "adopted"),
+        R("Pedestal", (f"{d.pedestal_x_mm:.0f} x {d.pedestal_y_mm:.0f} mm, height {d.pedestal_height_mm:.0f} mm"
+                       if d.pedestal_height_mm > 0 else "none"), "adopted"),
+        R("Water table", (f"{d.water_table_depth_m:.2f} m below ground" if d.water_table_depth_m is not None
+                          else "not entered (taken below the footing)"), "adopted"),
     ]})
+    N_uls = d.axial_load_kN + 1.35 * res.pedestal_weight_kN
 
     # ---------------- 2b. Footing Sizing (auto) ----------------
     if steps:
         rows = [R("EN 1997-1 6.4(5)", "Prescriptive method: presumed (allowable) bearing pressure "
-                                       "(Structville 8.3(c), 8.5.1)", "method")]
+                                       "(EN 1997-1 2.5, 6.5.2.4)", "method")]
         for s in steps:
             rows += [
                 R(f"Trial h = {s['h_mm']:.0f} mm", f"q_net = q_allow - gamma_c h - gamma_s h_s = "
@@ -302,9 +368,9 @@ def _build_report(request: PadFoundationRequest, res, steps=None) -> list:
         R("Moments about footing centre", ("pinned base: column moments not transferred; " if d.column_fixity == "pinned" else "")
           + f"Mx = Mx,col + NEd oy, My = My,col + NEd ox",
           f"Mx = {res.Mx_total_kNm:.3f}, My = {res.My_total_kNm:.3f} kNm"),
-        R("EN 1992-1-1 Cl. 9.8", f"ex = My / NEd = {res.My_total_kNm:.3f} / {d.axial_load_kN:.3f}",
+        R("EN 1992-1-1 Cl. 9.8", f"ex = My / NEd = {res.My_total_kNm:.3f} / {N_uls:.3f}",
           f"ex = {res.ex_m:.4f} m"),
-        R("EN 1992-1-1 Cl. 9.8", f"ey = Mx / NEd = {res.Mx_total_kNm:.3f} / {d.axial_load_kN:.3f}",
+        R("EN 1992-1-1 Cl. 9.8", f"ey = Mx / NEd = {res.Mx_total_kNm:.3f} / {N_uls:.3f}",
           f"ey = {res.ey_m:.4f} m"),
         R("Middle third limits", f"L/6 = {res.L_m/6:.4f} m, B/6 = {res.B_m/6:.4f} m", "limits"),
         R("Check", "ex within middle third", "OK" if res.ex_within_middle_third else "NOT OK"),
@@ -319,9 +385,11 @@ def _build_report(request: PadFoundationRequest, res, steps=None) -> list:
                                  f"{d.footing_depth_mm/1000:.3f} x 25.0", f"W_f = {res.footing_weight_kN:.2f} kN"),
         R("Soil on footing", f"W_s = (A - column area) x h_s x gamma_s = ({res.area_m2:.3f} - column) x {d.soil_depth_above_mm/1000:.3f} x "
                              f"{d.soil_unit_weight_kN_m3:.1f}", f"W_s = {res.soil_weight_kN:.2f} kN"),
+        *_pedestal_water_rows(d, res),
         R("SLS total load", ("N = N,sls + W_f + W_s" if not res.sls_from_uls else
                              f"N = NEd/{d.sls_factor:.2f} + W_f + W_s (no service loads entered)" if d.sls_factor else
-                             "N = NEd + W_f + W_s (no service loads entered)"),
+                             "N = NEd + W_f + W_s (no service loads entered)")
+          + (" + W_p" if d.pedestal_height_mm > 0 else "") + (" - U" if res.buoyancy_kN > 0 else ""),
           f"N = {res.sls_total_load_kN:.2f} kN"),
         R("Eccentricities (SLS)", f"ex = My/N = {res.sls_My_kNm:.3f}/{res.sls_total_load_kN:.2f}, "
                                   f"ey = Mx/N = {res.sls_Mx_kNm:.3f}/{res.sls_total_load_kN:.2f}",
@@ -337,7 +405,7 @@ def _build_report(request: PadFoundationRequest, res, steps=None) -> list:
           f"qmax = {res.sls_qmax:.3f} kN/m2, qmin = {res.sls_qmin:.3f} kN/m2"),
         R("Bearing check (warning only)", f"qmax vs allowable {d.allowable_bearing_kN_m2:.3f} kN/m2; not part of the overall result", res.bearing_status),
         R("Uplift check", "qmin >= 0, no tension", res.uplift_status),
-        R("ULS net pressure (for design)", f"q0 = NEd / A = {d.axial_load_kN:.3f} / {res.area_m2:.3f}, "
+        R("ULS net pressure (for design)", f"q0 = NEd / A = {N_uls:.3f} / {res.area_m2:.3f}, "
                                            "corners with ULS moments",
           f"q0 = {res.q0:.3f}, qmax = {res.qmax:.3f}, qmin = {res.qmin:.3f} kN/m2"),
     ]
@@ -346,7 +414,7 @@ def _build_report(request: PadFoundationRequest, res, steps=None) -> list:
     # ---------------- 6. Design Moments at Column Face ----------------
     sec.append({"section": "6. Design Moments at Column Face", "rows": [
         R("Design pressure", "ULS net pressure, linear along each direction (mean across the width); "
-                             "q_f at the column face from similar triangles (Structville 8.5.1)", "trapezoidal"),
+                             "q_f at the column face by linear interpolation (rigid footing, linear pressure: EN 1997-1 6.8(2))", "trapezoidal"),
         *[R(f"Moment, {lab} direction",
             f"M = q_f a^2/2 + (q_edge - q_f) a^2/3, a = {f['a']:.3f} m, q_edge = {f['q_edge']:.3f}, "
             f"q_f = {f['q_face']:.3f} kN/m2", f"M{lab.lower()} = {M:.3f} kNm/m")
@@ -362,12 +430,11 @@ def _build_report(request: PadFoundationRequest, res, steps=None) -> list:
               f"K = {flex.K:.5f}"),
             R("Lever arm (EC2)", "z = d[0.5 + sqrt(0.25 - K/1.134)]", f"z = {flex.z_mm:.1f} mm"),
             R("Required steel", "As = M/(0.87 fyk z)", f"As,req = {flex.As_req:.2f} mm2/m"),
-            R("Minimum steel", "As,min = max(0.26 fctm/fyk b d, 0.0013 b d), fctm = 0.30 fck^(2/3) (Table 3.1)",
-              f"As,min = {flex.As_min:.2f} mm2/m"),
+            *_steel_limit_rows(d, flex),
             R("Design steel", "As,design = max(As,req, As,min)", f"As,design = {flex.As_design:.2f} mm2/m"),
             R("Bar spacing", f"Adopt Y{d.bar_dia_mm:.0f} @ {flex.spacing_mm:.0f} mm c/c",
               f"As,provided = {flex.As_provided:.2f} mm2/m"),
-            R("Check", "As,provided >= As,design", flex.status),
+            R("Check", "As,design <= As,provided <= As,max", flex.status),
         ]})
 
     # ---------------- 9 & 10. One-way shear, X and Y ----------------
@@ -461,6 +528,15 @@ from engine.combined_footing_engine import size_combined_footing, CombinedPadInp
 
 
 def calculate_combined_footing(request: CombinedFootingRequest) -> CombinedFootingResponse:
+    """Bar size: the one given or, with auto_bars, the passing standard size
+    with the least scheduled steel (services/bar_selection.py)."""
+    from services import bar_selection
+    return bar_selection.run(
+        request, _calculate_combined_footing, lambda dia: {"bar_dia_mm": dia}, [12, 16, 20, 25],
+        lambda r: r.status, lambda r: r.detailing["summary"]["total_mass_kg"], "scheduled steel (kg)")
+
+
+def _calculate_combined_footing(request: CombinedFootingRequest) -> CombinedFootingResponse:
     inp = CombinedPadInput(
         P1_kN=request.column_1.axial_load_kN,
         P1_Mx_kNm=request.column_1.moment_x_kNm,
@@ -488,6 +564,12 @@ def calculate_combined_footing(request: CombinedFootingRequest) -> CombinedFooti
         sls_factor=request.sls_factor,
         soil_unit_weight=request.soil_unit_weight_kN_m3,
         soil_depth_above_mm=request.soil_depth_above_mm,
+        rho_min=request.min_reinf_ratio,
+        rho_max=request.max_reinf_ratio,
+        pedestal_height_mm=request.pedestal_height_mm,
+        pedestal_x_mm=request.pedestal_x_mm,
+        pedestal_y_mm=request.pedestal_y_mm,
+        water_table_depth_m=request.water_table_depth_m,
     )
 
     steps = None
@@ -632,7 +714,7 @@ def _build_combined_report(request: CombinedFootingRequest, res, steps=None) -> 
                      f"My = {d.column_2.moment_y_kNm:.3f} kNm", "adopted"),
         R("Service (SLS) loads", (f"P1,sls = {d.column_1.service_axial_kN:.3f} kN, P2,sls = {d.column_2.service_axial_kN:.3f} kN"
                                   if not res.sls_from_uls else
-                                  f"not entered for both columns -- ULS / {d.sls_factor:.2f} used where blank (Structville 8.5.4)"
+                                  f"not entered for both columns -- ULS / {d.sls_factor:.2f} used where blank (assumed ratio of EN 1990 Eq. 6.10 ULS to Eq. 6.14b characteristic loads)"
                                   if d.sls_factor else
                                   "not entered for both columns -- the ULS load is used for bearing (conservative)"),
           "bearing check"),
@@ -651,7 +733,7 @@ def _build_combined_report(request: CombinedFootingRequest, res, steps=None) -> 
         s0 = steps[0]
         rows = [
             R("EN 1997-1 6.4(5)", "Prescriptive method: presumed (allowable) bearing pressure "
-                                   "(Structville 8.3(c), 8.5.4)", "method"),
+                                   "(EN 1997-1 2.5, 6.5.2.4)", "method"),
             R("Resultant of SLS column loads", f"x = (P2,sls s + sum My,sls) / (P1,sls + P2,sls) from column 1",
               f"x = {s0['x_bar_m']:.3f} m"),
             R("Footing centroid on the resultant", "p1 + x = L/2 = p2 + (s - x); shorter overhang = entered "
@@ -709,7 +791,9 @@ def _build_combined_report(request: CombinedFootingRequest, res, steps=None) -> 
           + "; service moments = ULS moments x P_sls/P_uls of each column", "adopted"),
         R("Soil on footing", f"W_s = (A - columns) x h_s x gamma_s, h_s = {d.soil_depth_above_mm/1000:.3f} m, "
                              f"gamma_s = {d.soil_unit_weight_kN_m3:.1f}", f"W_s = {res.soil_weight_kN:.2f} kN"),
-        R("SLS total load", "N = P1,sls + P2,sls + W_f + W_s", f"N = {res.sls_total_load_kN:.2f} kN"),
+        *_pedestal_water_rows(d, res, 2),
+        R("SLS total load", "N = P1,sls + P2,sls + W_f + W_s" + (" + 2 W_p" if d.pedestal_height_mm > 0 else "")
+          + (" - U" if res.buoyancy_kN > 0 else ""), f"N = {res.sls_total_load_kN:.2f} kN"),
         R("SLS moments about centre", "My = P1,sls(x1 - L/2) + P2,sls(x2 - L/2) + My,sls; Mx = Mx,sls",
           f"My = {res.sls_My_kNm:.3f}, Mx = {res.sls_Mx_kNm:.3f} kNm"),
         R("Eccentricities", "ex = My/N, ey = Mx/N", f"ex = {res.sls_ex_m:.4f} m, ey = {res.sls_ey_m:.4f} m"),
@@ -758,11 +842,11 @@ def _build_combined_report(request: CombinedFootingRequest, res, steps=None) -> 
           f"K = {res.long_flex.K:.5f} (limit 0.167)"),
         R("Lever arm (EC2)", "z = d[0.5 + sqrt(0.25 - K/1.134)] <= 0.95d", f"z = {res.long_flex.z_mm:.1f} mm"),
         R("Required steel", "As = M/(0.87 fyk z) / B (per metre width)", f"As,req = {res.long_flex.As_req:.2f} mm2/m"),
-        R("Minimum steel", "As,min = max(0.26 fctm/fyk, 0.0013) b d, fctm = 0.30 fck^(2/3) (EC2 Table 3.1)", f"As,min = {res.long_flex.As_min:.2f} mm2/m"),
+        *_steel_limit_rows(d, res.long_flex),
         R("Design steel", "As,design = max(As,req, As,min)", f"As,design = {res.long_flex.As_design:.2f} mm2/m"),
         R("Bar spacing", f"Adopt Y{d.bar_dia_mm:.0f} @ {res.long_flex.spacing_mm:.0f} mm c/c",
           f"As,provided = {res.long_flex.As_provided:.2f} mm2/m"),
-        R("Check", "As,provided >= As,design and K <= 0.167", res.long_flex.status),
+        R("Check", "As,design <= As,provided <= As,max and K <= 0.167", res.long_flex.status),
     ]})
 
     top_rows = [
@@ -770,11 +854,11 @@ def _build_combined_report(request: CombinedFootingRequest, res, steps=None) -> 
           f"K = {res.long_top_flex.K:.5f} (limit 0.167)"),
         R("Lever arm (EC2)", "z = d[0.5 + sqrt(0.25 - K/1.134)] <= 0.95d", f"z = {res.long_top_flex.z_mm:.1f} mm"),
         R("Required steel", "As = M/(0.87 fyk z) / B (per metre width)", f"As,req = {res.long_top_flex.As_req:.2f} mm2/m"),
-        R("Minimum steel", "As,min = max(0.26 fctm/fyk, 0.0013) b d, fctm = 0.30 fck^(2/3) (EC2 Table 3.1)", f"As,min = {res.long_top_flex.As_min:.2f} mm2/m"),
+        *_steel_limit_rows(d, res.long_top_flex),
         R("Design steel", "As,design = max(As,req, As,min)", f"As,design = {res.long_top_flex.As_design:.2f} mm2/m"),
         R("Bar spacing", f"Adopt Y{d.bar_dia_mm:.0f} @ {res.long_top_flex.spacing_mm:.0f} mm c/c",
           f"As,provided = {res.long_top_flex.As_provided:.2f} mm2/m"),
-        R("Check", "As,provided >= As,design and K <= 0.167", res.long_top_flex.status),
+        R("Check", "As,design <= As,provided <= As,max and K <= 0.167", res.long_top_flex.status),
     ]
     if res.M_hog_kNm <= 0:
         top_rows.insert(0, R("Note", "no hogging anywhere along the footing -- As,min shown as nominal top steel", ""))
@@ -790,11 +874,11 @@ def _build_combined_report(request: CombinedFootingRequest, res, steps=None) -> 
           f"K = {res.trans_flex.K:.5f}"),
         R("Lever arm (EC2)", "z = d[0.5 + sqrt(0.25 - K/1.134)]", f"z = {res.trans_flex.z_mm:.1f} mm"),
         R("Required steel", "As = M/(0.87 fyk z)", f"As,req = {res.trans_flex.As_req:.2f} mm2/m"),
-        R("Minimum steel", "As,min = max(0.26 fctm/fyk b d, 0.0013 b d)", f"As,min = {res.trans_flex.As_min:.2f} mm2/m"),
+        *_steel_limit_rows(d, res.trans_flex),
         R("Design steel", "As,design = max(As,req, As,min)", f"As,design = {res.trans_flex.As_design:.2f} mm2/m"),
         R("Bar spacing", f"Adopt Y{d.bar_dia_mm:.0f} @ {res.trans_flex.spacing_mm:.0f} mm c/c",
           f"As,provided = {res.trans_flex.As_provided:.2f} mm2/m"),
-        R("Check", "As,provided >= As,design", res.trans_flex.status),
+        R("Check", "As,design <= As,provided <= As,max", res.trans_flex.status),
     ]})
 
     rows = [
@@ -876,14 +960,16 @@ def _starters(request, h, mat_phi, n_cols, rows):
         return None
     phi = request.starter_bar_dia_mm
     proj, lap = fd.starter_projection(phi, request.steel_grade_fyk, request.concrete_grade_fck,
-                                      request.soil_depth_above_mm, request.starter_projection_mm,
+                                      request.pedestal_height_mm if request.pedestal_height_mm > 0
+                                      else request.soil_depth_above_mm, request.starter_projection_mm,
                                       request.gamma_c, request.gamma_s)
     mark = f"{len(rows) + 1:02d}"
     rows.append(fd.starter_row(mark, phi, request.starter_bar_count, n_cols, request.n_members,
                                h, request.cover_mm, mat_phi, proj))
     return {"phi_mm": phi, "per_column": request.starter_bar_count, "columns": n_cols,
             "projection_mm": round(proj), "lap_mm": round(lap),
-            "projection_from": "entered" if request.starter_projection_mm else "soil depth + lap l0"}
+            "projection_from": "entered" if request.starter_projection_mm else
+            ("pedestal height + lap l0" if request.pedestal_height_mm > 0 else "soil depth + lap l0")}
 
 
 def _pad_detailing(request: PadFoundationRequest, res) -> dict:
@@ -921,14 +1007,16 @@ def _combined_detailing(request: CombinedFootingRequest, res) -> dict:
     # ULS qmax at the edge: conservative for both directions
     common = dict(phi=phi, cover=c, h=h, fck=d.concrete_grade_fck, fyk=d.steel_grade_fyk,
                   gamma_c=d.gamma_c, gamma_s=d.gamma_s, q_edge=res.qmax)
-    a_end = max(res.x1_m * 1000, L - res.x2_m * 1000) - d.column_x_mm / 2
+    fx = d.pedestal_x_mm if d.pedestal_height_mm > 0 else d.column_x_mm
+    fy = d.pedestal_y_mm if d.pedestal_height_mm > 0 else d.column_y_mm
+    a_end = max(res.x1_m * 1000, L - res.x2_m * 1000) - fx / 2
     anch = [
         fd.edge_anchorage(label="Longitudinal bottom (end overhang)", spacing=res.long_flex.spacing_mm,
                           As_prov=res.long_flex.As_provided, d_eff=res.d_long_mm, a_mm=a_end,
-                          col_b_mm=d.column_x_mm, **common),
+                          col_b_mm=fx, **common),
         fd.edge_anchorage(label="Transverse bottom", spacing=res.trans_flex.spacing_mm,
                           As_prov=res.trans_flex.As_provided, d_eff=res.d_trans_mm,
-                          a_mm=res.projection_y_m * 1000, col_b_mm=d.column_y_mm, **common),
+                          a_mm=res.projection_y_m * 1000, col_b_mm=fy, **common),
     ]
     rows = [
         fd.mat_row("01", phi, res.long_flex.spacing_mm, L, B, c, anch[0]["leg_mm"], d.n_members,
@@ -969,23 +1057,23 @@ def _detailing_section(num: str, request, det: dict) -> dict:
               f"F_s = R z_e/z_i = {a['Fs_kN_m']:.2f} kN/m"),
             R("Bar stress to anchor", f"sigma_s = F_s / A_s,prov; f_bd = 2.25 f_ctd = {a['fbd_MPa']:.2f} N/mm2",
               f"sigma_s = {a['sigma_s_MPa']:.1f} N/mm2"),
-            R("EC2 8.4.4 (book 9.1.2)", f"l_b,rqd = (phi/4)(sigma_s/f_bd) = {a['lb_rqd_mm']:.0f} mm; "
+            R("EC2 8.4.2, 8.4.3 Eq. 8.3", f"l_b,rqd = (phi/4)(sigma_s/f_bd) = {a['lb_rqd_mm']:.0f} mm; "
               f"l_b,min = {a['lb_min_mm']:.0f} mm; straight l_bd = {a['lbd_straight_mm']:.0f} mm vs x - cover = "
               f"{a['available_straight_mm']:.0f} mm", "straight bar enough" if a["straight_ok"] else "bend needed"),
-            R("Bent bar (book 9.10)", f"alpha1 = {a['alpha1']:.2f}, alpha2 = {a['alpha2']:.3f} (c_d = {a['cd_mm']:.0f} mm); "
+            R("Bent bar (EC2 8.4.4, Table 8.2)", f"alpha1 = {a['alpha1']:.2f}, alpha2 = {a['alpha2']:.3f} (c_d = {a['cd_mm']:.0f} mm); "
               f"l_bd = {a['lbd_bent_mm']:.0f} mm; leg = max(150, l_bd - (x - c)) <= h - 2c = {a['leg_max_mm']:.0f}",
               f"leg {a['leg_mm']:.0f} mm {a['status']}"),
-            R("Full-strength anchorage (info)", "l_bd at sigma_sd = f_yd, bent bar (book 9.10)",
+            R("Full-strength anchorage (info)", "l_bd at sigma_sd = f_yd, bent bar (EC2 8.4.4 Eq. 8.4)",
               f"{a['lbd_full_mm']:.0f} mm = {a['lbd_full_phi']:.2f} phi"),
         ]
     st = det["starters"]
     if st:
-        rows.append(R("Starter bars (book 10.2)", f"{st['per_column']} Y{st['phi_mm']:.0f} per column x {st['columns']}; "
-                      f"lap l0 = 1.5 l_b,rqd >= max(15 phi, 200) = {st['lap_mm']} mm (book 9.1.6); projection above "
+        rows.append(R("Starter bars (EC2 8.7)", f"{st['per_column']} Y{st['phi_mm']:.0f} per column x {st['columns']}; "
+                      f"lap l0 = 1.5 l_b,rqd >= max(15 phi, 200) = {st['lap_mm']} mm (EC2 8.7.3 Eq. 8.10, 8.11, alpha6 = 1.5); projection above "
                       f"footing = {st['projection_mm']} mm ({st['projection_from']}); foot 300 mm on the bottom mat",
                       "scheduled"))
     rows.append(R("Bar callouts", "number-size-mark-spacing", ", ".join(det["callouts"])))
-    rows.append(R("Bar schedule", "cut length = sum of the shape dimensions (book 10.2 convention, no bend deduction); "
+    rows.append(R("Bar schedule", "cut length = sum of the shape dimensions (BS 8666 bend deduction not applied: lengths slightly long); "
                   f"{request.n_members} identical footing(s)", "see schedule"))
     for r in det["schedule"]:
         dims = ", ".join(f"{k} = {v}" for k, v in r["dims_mm"].items())
