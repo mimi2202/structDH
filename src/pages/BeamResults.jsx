@@ -4,7 +4,11 @@ import { FiArrowLeft, FiFileText, FiDownload, FiChevronRight } from "react-icons
 import { exportElementToPdf } from "../utils/exportPdf";
 import { buildCoverHtml } from "../utils/reportCover";
 import BeamReportModal from "../components/beam/BeamReportModal";
+import FullDocument from "../components/results/FullDocument";
+import SpanBMD from "../components/results/SpanBMD";
+import { DIAGRAM } from "../components/results/diagramTheme";
 import { useDesignMeta } from "../contexts/DesignMetaContext";
+import DesignTopBar from "../components/results/DesignTopBar";
 
 const DIM = "var(--dim)";
 const DIM_WRAP = "text-[#475569] dark:text-[#94a3b8] [--dim:#0A2F44] dark:[--dim:#66a4c2]";
@@ -13,8 +17,6 @@ const MAIN = "text-[#0F172A] dark:text-white";
 const SUB = "text-[#64748b] dark:text-[#94a3b8]";
 const ACCENT = "text-[#0A2F44] dark:text-[#66a4c2]";
 const HEAD = "text-[13px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]";
-const RED = "#ef4444";
-const GREEN = "#16a34a";
 
 const f = (v, d = 2) => (Number.isFinite(v) ? Number(v).toFixed(d) : "\u2014");
 const isPass = (s) => s === "PASS" || s === "OK";
@@ -23,7 +25,7 @@ const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection"];
 
 // what each tab holds, for the cover page of its PDF
 const TAB_NOTES = {
-  "Overview": "geometry, loads, moment and shear diagrams, reinforcement and the status of every check.",
+  "Overview": "the complete design document: summary, flexural, shear and deflection sections in full, and the full calculation report, numbered.",
   "Flexural Design": "the bending design in full: K, lever arm, tension and minimum steel, bars provided (EC2 6.1).",
   "Shear Design": "the shear design in full: resistance without links, links where needed (EC2 6.2).",
   "Deflection": "the span/depth deflection check in full (EC2 7.4.2).",
@@ -86,6 +88,23 @@ export default function BeamResults() {
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#111827] pb-10">
+      <DesignTopBar element="beam"
+        crumbs={[
+          { label: "Beam Design", to: "/beam" },
+          { label: "Simply Supported Beam", to: "/beam" },
+          { label: "Results" },
+        ]}
+        onNew={() => navigate("/beam")}
+        save={{
+          name: `Beam ${summary.beam_id || ""} ${summary.span} mm span, ${summary.width} × ${summary.depth}`.replace(/\s+/g, " "),
+          status: pass ? "PASS" : "FAIL",
+          subtitle: [summary.concrete_grade, summary.steel_grade, summary.support_condition].filter(Boolean).join(" · "),
+        }}
+        onOpened={() => setTab("Overview")}
+        menu={[
+          ["Detailed report", () => setReportOpen(true)],
+          ["Download report (PDF)", downloadPdf],
+        ]} />
       <div ref={sheetRef} className="px-6 pt-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -129,6 +148,7 @@ export default function BeamResults() {
         </div>
 
         {tab === "Overview" && (
+        <FullDocument report={report} parts={[{ title: "Design Summary", node: (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div className="space-y-5">
             <Card n="1" title="Geometry">
@@ -323,7 +343,11 @@ export default function BeamResults() {
             </Card>
           </div>
         </div>
-
+        ) },
+          { title: "Flexural Design", node: <FlexuralTab ctx={ctx} /> },
+          { title: "Shear Design", node: <ShearTab ctx={ctx} /> },
+          { title: "Deflection", node: <DeflectionTab ctx={ctx} /> },
+        ]} />
         )}
 
         {tab === "Flexural Design" && <FlexuralTab ctx={ctx} />}
@@ -454,8 +478,8 @@ function Card({ n, title, children }) {
   return (
     <section className={CARD}>
       <header className="flex items-center gap-2 border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5">
-        {n && <span className="flex h-5 w-5 items-center justify-center rounded bg-[#e6f0f5] dark:bg-[#1e3a4a] text-[11px] font-bold text-[#0A2F44] dark:text-[#66a4c2]">{n}</span>}
-        <h3 className={HEAD}>{title}</h3>
+        {n && <span className="doc-n flex h-5 w-5 items-center justify-center rounded bg-[#e6f0f5] dark:bg-[#1e3a4a] text-[11px] font-bold text-[#0A2F44] dark:text-[#66a4c2]">{n}</span>}
+        <h3 className={`doc-h ${HEAD}`}>{title}</h3>
       </header>
       <div className="p-4">{children}</div>
     </section>
@@ -647,31 +671,16 @@ function LoadingSVG({ span, wk }) {
   );
 }
 function BMDSVG({ mMax, span }) {
-  const x0 = 40, x1 = 340, base = 40, depth = 80;
-  const mid = (x0 + x1) / 2;
-  return (
-    <div className={DIM_WRAP}>
-      <svg viewBox="0 0 380 170" className="w-full">
-        <path d={`M${x0},${base} Q${mid},${base + 2 * depth} ${x1},${base} Z`} fill={RED} fillOpacity="0.75" stroke={RED} strokeWidth="1.4" />
-        <text x={mid} y={base + depth + 4} fontSize="13" fill="#fff" textAnchor="middle" fontWeight="bold">+</text>
-        <text x={mid} y={base - 8} fontSize="11" fill={RED} textAnchor="middle" fontWeight="bold">M_Ed,max = {f(mMax)} kN{"\u00b7"}m</text>
-        <text x={x0 - 4} y={base + 4} fontSize="10" fill="currentColor" textAnchor="end">0</text>
-        <text x={x1 + 4} y={base + 4} fontSize="10" fill="currentColor">0</text>
-        <line x1={x0} y1={base + depth + 22} x2={x1} y2={base + depth + 22} stroke={DIM} strokeWidth="1" markerStart="url(#bm)" markerEnd="url(#bm)" />
-        <text x={mid} y={base + depth + 36} fontSize="10" fill={DIM} textAnchor="middle">{span} mm</text>
-        <defs><marker id="bm" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill={DIM} /></marker></defs>
-      </svg>
-    </div>
-  );
+  return <SpanBMD Mpos={mMax} leftLabel="Support A" rightLabel="Support B" caption={`span = ${span} mm`} unit="kNm" />;
 }
 function DeflectedShapeSVG({ defl, span }) {
   return (
     <div className={DIM_WRAP}>
       <svg viewBox="0 0 380 130" className="w-full">
         <line x1="30" y1="30" x2="350" y2="30" stroke="currentColor" strokeWidth="1" strokeDasharray="4 3" />
-        <path d="M30,30 Q190,80 350,30" fill="none" stroke="#6366f1" strokeWidth="2" />
+        <path d="M30,30 Q190,80 350,30" fill="none" stroke={DIAGRAM.deflection} strokeWidth="2" />
         <line x1="190" y1="30" x2="190" y2="70" stroke="currentColor" strokeWidth="1" />
-        <text x="196" y="52" fontSize="10" fill="#6366f1">δ = {f(defl, 2)} mm</text>
+        <text x="196" y="52" fontSize="10" fill={DIAGRAM.deflection}>δ = {f(defl, 2)} mm</text>
         <line x1="30" y1="100" x2="350" y2="100" stroke={DIM} strokeWidth="1" markerStart="url(#defl)" markerEnd="url(#defl)" />
         <text x="190" y="114" fontSize="10" fill={DIM} textAnchor="middle">{span} mm</text>
         <defs><marker id="defl" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill={DIM} /></marker></defs>
@@ -687,10 +696,10 @@ function SFDSVG({ vMax, span }) {
     <div className={DIM_WRAP}>
       <svg viewBox="0 0 380 150" className="w-full">
         <line x1={x0} y1={mid} x2={x1} y2={mid} stroke="currentColor" strokeWidth="1" />
-        <polygon points={`${x0},${mid} ${x0},${mid - h} ${cx},${mid}`} fill={RED} fillOpacity="0.75" stroke={RED} strokeWidth="1.3" />
-        <polygon points={`${cx},${mid} ${x1},${mid + h} ${x1},${mid}`} fill={GREEN} fillOpacity="0.75" stroke={GREEN} strokeWidth="1.3" />
-        <text x={x0 - 4} y={mid - h - 4} fontSize="10" fill={RED}>+{f(vMax)} kN</text>
-        <text x={x1 + 4} y={mid + h + 12} fontSize="10" fill={GREEN} textAnchor="end">-{f(vMax)} kN</text>
+        <polygon points={`${x0},${mid} ${x0},${mid - h} ${cx},${mid}`} fill={DIAGRAM.shear} fillOpacity={DIAGRAM.fillOpacity} stroke={DIAGRAM.shear} strokeWidth="1.3" />
+        <polygon points={`${cx},${mid} ${x1},${mid + h} ${x1},${mid}`} fill={DIAGRAM.shear} fillOpacity={DIAGRAM.fillOpacity} stroke={DIAGRAM.shear} strokeWidth="1.3" />
+        <text x={x0 - 4} y={mid - h - 4} fontSize="10" fill={DIAGRAM.shear}>+{f(vMax)} kN</text>
+        <text x={x1 + 4} y={mid + h + 12} fontSize="10" fill={DIAGRAM.shear} textAnchor="end">-{f(vMax)} kN</text>
         <text x={x0 - 6} y={mid + 4} fontSize="10" fill="currentColor" textAnchor="end">0</text>
         <line x1={x0} y1={mid + h + 22} x2={x1} y2={mid + h + 22} stroke={DIM} strokeWidth="1" markerStart="url(#sf)" markerEnd="url(#sf)" />
         <text x={cx} y={mid + h + 36} fontSize="10" fill={DIM} textAnchor="middle">{span} mm</text>

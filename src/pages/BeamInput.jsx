@@ -7,10 +7,14 @@ import {
   FiArrowRight, FiLoader, FiAlertTriangle, FiPlus, FiMinus,
 } from "react-icons/fi";
 import DesignProgressBar from "../components/ui/DesignProgressBar";
+import ResetButton from "../components/ui/ResetButton";
+import { applySettings } from "../utils/appSettings";
 import { beamAPI } from "../services/api";
 
 const RESULTS_SIMPLE = "/beam-results";
 const RESULTS_CONTINUOUS = "/continuous-beam-results";
+// which form fields the Settings page pre-fills (utils/appSettings.js)
+const SETTINGS_MAP = { keys: "camel", concrete: "concreteGrade", steel: "steelGrade" };
 const DRAFT_KEY = "beamInputDraft";
 
 const CARD = "bg-white dark:bg-[#1f2937] rounded-xl shadow-sm border border-[#e2e8f0] dark:border-[#334155]";
@@ -162,14 +166,14 @@ const BeamInput = () => {
   const [f, setF] = useState(() => {
     try {
       const saved = sessionStorage.getItem(DRAFT_KEY);
-      return saved ? ec2Draft(DEFAULTS, JSON.parse(saved).ss) : DEFAULTS;
-    } catch { return DEFAULTS; }
+      return saved ? applySettings(ec2Draft(DEFAULTS, JSON.parse(saved).ss), SETTINGS_MAP) : applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true });
+    } catch { return applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true }); }
   });
   const [c, setC] = useState(() => {
     try {
       const saved = sessionStorage.getItem(DRAFT_KEY);
-      return saved ? ec2Draft(CB_DEFAULTS, JSON.parse(saved).cb) : CB_DEFAULTS;
-    } catch { return CB_DEFAULTS; }
+      return saved ? applySettings(ec2Draft(CB_DEFAULTS, JSON.parse(saved).cb), SETTINGS_MAP) : applySettings(CB_DEFAULTS, { ...SETTINGS_MAP, fresh: true });
+    } catch { return applySettings(CB_DEFAULTS, { ...SETTINGS_MAP, fresh: true }); }
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -226,8 +230,7 @@ const BeamInput = () => {
   const spanLoadVal = (i, key) => (c.spanLoads?.[i]?.[key] ?? "");
 
   const reset = () => {
-    if (!window.confirm("Reset all fields?")) return;
-    if (continuous) setC(CB_DEFAULTS); else setF(DEFAULTS);
+    if (continuous) setC(applySettings(CB_DEFAULTS, { ...SETTINGS_MAP, fresh: true })); else setF(applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true }));
     setError(null);
   };
 
@@ -380,12 +383,15 @@ const BeamInput = () => {
         <DesignProgressBar active={busy} />
 
         <div className="mb-5">
+          <div className="flex items-start justify-between gap-3">
           <h1 className="text-base font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">
             {continuous ? "Continuous Beam Input" : "Simply Supported Beam Input"}
           </h1>
+          <ResetButton variant="top" onReset={reset} what={continuous ? "the continuous beam input" : "the beam input"} />
+          </div>
           <p className={`text-sm ${SUB}`}>
             {continuous
-              ? "Enter span arrangement, section, material properties and loads. Pattern loading is applied by the engine."
+              ? "Enter span arrangement, section, material properties and loads. Every span carries the full design load (no pattern loading)."
               : "Enter beam details, material properties, loads and support conditions."}
           </p>
         </div>
@@ -738,10 +744,8 @@ const BeamInput = () => {
         )}
       </div>
 
-      <div className="border-t border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1f2937] px-6 py-4">
+      <div className="mt-6 border-t border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1f2937] px-6 py-4">
         <div className="flex items-center justify-end gap-3">
-          <button onClick={reset} className={`flex items-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-4 py-2 text-sm ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#334155]`}><FiRefreshCw size={15} /> Reset</button>
-          <button className={`flex items-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-4 py-2 text-sm ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#334155]`}><FiSave size={15} /> Save</button>
           <button onClick={continuous ? proceedContinuous : proceedSimple} disabled={busy} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-5 py-2 text-sm font-medium text-white shadow-md hover:bg-[#082636] disabled:opacity-50">
             {busy ? <FiLoader className="animate-spin" size={15} /> : null}{busy ? "Designing…" : "Proceed to Design"} <FiArrowRight size={15} />
           </button>

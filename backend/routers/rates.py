@@ -15,10 +15,13 @@ async def get_rates(region: str):
         with open(rates_path, 'r') as f:
             rates_db = json.load(f)
         
-        if region in rates_db:
-            return {"region": region, "rates": rates_db[region]}
-        else:
-            return {"region": region, "rates": rates_db.get("UK", {}), "note": "Region not found, using UK defaults"}
+        # regions sit under "regions" (same lookup as services/slab_service.resolve_rates);
+        # reading the top level returned empty rates for every region
+        root = rates_db.get("regions", rates_db)
+        if region in root:
+            return {"region": region, "version": rates_db.get("version"), "rates": root[region]}
+        return {"region": region, "version": rates_db.get("version"), "rates": root.get("UK", {}),
+                "note": "Region not found, using UK defaults"}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Rates database not found")
     except Exception as e:
@@ -34,6 +37,6 @@ async def list_regions():
     try:
         with open(rates_path, 'r') as f:
             rates_db = json.load(f)
-        return {"regions": list(rates_db.keys())}
+        return {"regions": list(rates_db.get("regions", rates_db).keys()), "version": rates_db.get("version")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

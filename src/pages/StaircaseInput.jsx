@@ -6,6 +6,8 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiTriangle, FiRefreshCw, FiLoader, FiInfo, FiAlertTriangle } from "react-icons/fi";
 import DesignProgressBar from "../components/ui/DesignProgressBar";
+import ResetButton from "../components/ui/ResetButton";
+import { applySettings } from "../utils/appSettings";
 import Dropdown from "../components/Dropdown";
 import { staircaseAPI } from "../services/api";
 
@@ -18,6 +20,8 @@ const MAIN = "text-[#0F172A] dark:text-white";
 
 const CONCRETE = ["C20/25", "C25/30", "C30/37", "C35/45", "C40/50"];
 const BARS = ["8", "10", "12", "16", "20"];
+// which form fields the Settings page pre-fills (utils/appSettings.js)
+const SETTINGS_MAP = { keys: "snake", concrete: "concrete", steel: "fyk", steelNumeric: true };
 const DRAFT_KEY = "staircaseInputDraft";
 
 const DEFAULTS = {
@@ -41,8 +45,10 @@ const fckOf = (g) => parseFloat(String(g).replace(/^C/, ""));
 export default function StaircaseInput() {
   const navigate = useNavigate();
   const [form, setForm] = useState(() => {
-    try { return { ...DEFAULTS, ...JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "{}") }; }
-    catch { return DEFAULTS; }
+    try {
+      const saved = sessionStorage.getItem(DRAFT_KEY);
+      return saved ? applySettings({ ...DEFAULTS, ...JSON.parse(saved) }, SETTINGS_MAP) : applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true });
+    } catch { return applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true }); }
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -50,7 +56,7 @@ export default function StaircaseInput() {
 
   useEffect(() => { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(form)); }, [form]);
 
-  const reset = () => { sessionStorage.removeItem(DRAFT_KEY); setForm(DEFAULTS); setError(null); };
+  const reset = () => { sessionStorage.removeItem(DRAFT_KEY); setForm(applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true })); setError(null); };
 
   const run = async () => {
     for (const [k, label] of [["n_risers", "Number of risers"], ["riser_mm", "Riser"], ["going_mm", "Going"],
@@ -108,6 +114,7 @@ export default function StaircaseInput() {
           <div className={`text-sm font-bold ${MAIN}`}>Staircase Input (EC2)</div>
           <div className={`text-[11px] ${SUB}`}>Flight + landing, per metre width · EN 1992-1-1 · kN, m</div>
         </div>
+        <div className="ml-auto"><ResetButton variant="top" onReset={reset} what="the staircase input" /></div>
       </header>
 
       <div className="w-full px-6 py-6">
@@ -237,10 +244,7 @@ export default function StaircaseInput() {
           </div>
         </div>
 
-        <div className="mt-6 flex items-center justify-between gap-3 border-t border-[#e2e8f0] dark:border-[#334155] pt-5">
-          <button onClick={reset} className={`flex items-center justify-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-5 py-2.5 text-sm ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#334155]`}>
-            <FiRefreshCw size={15} /> Reset
-          </button>
+        <div className="mt-6 flex items-center justify-end gap-3 border-t border-[#e2e8f0] dark:border-[#334155] pt-5">
           <button onClick={run} disabled={busy}
             className="flex items-center justify-center gap-2 rounded-lg bg-[#0A2F44] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#082636] disabled:opacity-50">
             {busy ? <FiLoader className="animate-spin" size={15} /> : null} Save & Proceed to Design

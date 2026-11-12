@@ -5,8 +5,17 @@ import {
   FiGrid, FiLayers, FiBarChart2, FiColumns, FiSquare,
   FiTriangle, FiWind, FiDroplet, FiSettings, FiHelpCircle,
   FiSun, FiMoon, FiUser, FiLogOut, FiMenu, FiChevronLeft, FiChevronDown,
-  FiArrowLeft, FiBell
+  FiArrowLeft, FiBell, FiFolder
 } from 'react-icons/fi';
+
+// Breadcrumb stages that are pages of their own; the first stage ("Slab
+// Design", ...) goes to the module's input page, the last is the current page.
+const CRUMB_PATHS = {
+  'Continuous Slab': '/continuous-slab',
+  'Simply Supported Beam': '/beam',
+  'Continuous Beam': '/continuous-beam',
+  'Quick Design': '/new-design',
+};
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useDesignMeta } from '../../contexts/DesignMetaContext';
@@ -43,6 +52,7 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
     { id: 'column', name: 'Column', icon: FiColumns, path: '/column-input' },
     { id: 'foundation', name: 'Foundation', icon: FiSquare, path: '/foundation-input' },
     { id: 'staircase', name: 'Staircase', icon: FiTriangle, path: '/staircase-design' },
+    { id: 'saved-designs', name: 'Saved Designs', icon: FiFolder, path: '/saved-designs' },
     { id: 'loads', name: 'Load Cases', icon: FiWind, path: '/load-cases' },
     { id: 'materials', name: 'Materials', icon: FiDroplet, path: '/materials' },
     { id: 'settings', name: 'Settings', icon: FiSettings, path: '/settings' },
@@ -59,6 +69,17 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
   const handleBack = () => {
     navigate(-1);
   };
+
+  // "Slab Design > Continuous Slab > Results" -> clickable stages. Inside a
+  // workspace project the module stage goes back to that project's input page.
+  const scoped = location.pathname.match(/^\/workspace\/[^/]+\/projects\/[^/]+/);
+  const modulePath = scoped && currentModule === 'slab'
+    ? `${scoped[0]}/slab-input`
+    : navItems.find((n) => n.id === currentModule)?.path;
+  const crumbs = (breadcrumb || '').split('>').map((s) => s.trim()).filter(Boolean).map((label, i, all) => ({
+    label,
+    to: i === all.length - 1 ? null : (CRUMB_PATHS[label] || modulePath),
+  }));
 
   const toggleMenu = (id) => setOpenMenus((m) => ({ ...m, [id]: !m[id] }));
   const childActive = (path) => location.pathname === path || location.pathname.startsWith(path + '-');
@@ -245,7 +266,16 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
                 {breadcrumb && (
                   <div className="hidden md:flex items-center space-x-2 text-sm">
                     <span className="text-[#9ca3af]">/</span>
-                    <span className="text-[#6b7280] dark:text-[#9ca3af]">{breadcrumb}</span>
+                    {crumbs.map((c, i) => (
+                      <React.Fragment key={i}>
+                        {i > 0 && <span className="text-[#9ca3af]">&gt;</span>}
+                        {c.to ? (
+                          <Link to={c.to} className="rounded text-[#6b7280] dark:text-[#9ca3af] transition-colors hover:bg-[#e6f0f5] hover:text-[#0A2F44] dark:hover:bg-[#1e3a4a] dark:hover:text-[#66a4c2]">{c.label}</Link>
+                        ) : (
+                          <span className="font-medium text-[#02090d] dark:text-white">{c.label}</span>
+                        )}
+                      </React.Fragment>
+                    ))}
                   </div>
                 )}
               </div>

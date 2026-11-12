@@ -2,6 +2,21 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Tailwind v4 leaves buttons on the arrow cursor. Every button (and
+   anything acting as one) shows the hand on hover; a disabled one does not. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  select,
+  summary,
+  label:has(input[type="checkbox"], input[type="radio"]),
+  input[type="checkbox"],
+  input[type="radio"] {
+    cursor: pointer;
+  }
+  button:disabled { cursor: not-allowed; }
+}
+
 /* ============================================================
    LIGHT THEME (unchanged)
    ============================================================ */

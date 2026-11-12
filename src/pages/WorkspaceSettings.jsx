@@ -1,3 +1,4 @@
+import Dropdown from '../components/Dropdown'
 import React, { useState, useEffect, useRef } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
@@ -1062,27 +1063,11 @@ const WorkspaceSettings = () => {
               <label className="block text-sm font-medium text-[#374151] dark:text-[#d1d5db] mb-2">
                 Select New Owner
               </label>
-              <select
-                value={selectedNewOwner}
-                onChange={(e) => setSelectedNewOwner(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0A2F44]"
-              >
-                <option value="">Select a member...</option>
-                {members && members.length > 0 ? (
-                  members
-                    .filter((m) => {
-                      const isCurrentOwner = m.role === 'owner' || m.role === ROLES.ORG_OWNER
-                      return !isCurrentOwner
-                    })
-                    .map((member) => (
-                      <option key={member.id} value={member.user_id}>
-                        {member.name} ({member.email}) - Current: {member.role}
-                      </option>
-                    ))
-                ) : (
-                  <option disabled>Loading members...</option>
-                )}
-              </select>
+              <Dropdown value={selectedNewOwner} onChange={(v) => setSelectedNewOwner(v)} className="py-3"
+                placeholder={members && members.length > 0 ? "Select a member..." : "Loading members..."}
+                options={(members || [])
+                  .filter((m) => !(m.role === 'owner' || m.role === ROLES.ORG_OWNER))
+                  .map((member) => ({ value: member.user_id, label: `${member.name} (${member.email}) - Current: ${member.role}` }))} />
             </div>
 
             <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 mb-6">

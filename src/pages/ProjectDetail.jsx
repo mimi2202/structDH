@@ -1,3 +1,4 @@
+import Dropdown from '../components/Dropdown'
 import React, { useState, useEffect } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
@@ -565,33 +566,27 @@ const ProjectDetail = () => {
                   <label className="block text-sm font-medium text-[#374151] dark:text-[#d1d5db] mb-2">
                     Project Type
                   </label>
-                  <select
-                    name="project_type"
-                    value={formData.project_type}
-                    onChange={handleInputChange}
-                    className="px-4 py-2 rounded-lg border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0A2F44]"
-                  >
-                    <option value="residential">Residential</option>
-                    <option value="commercial">Commercial</option>
-                    <option value="industrial">Industrial</option>
-                    <option value="infrastructure">Infrastructure</option>
-                  </select>
+                  <Dropdown value={formData.project_type}
+                    onChange={(v) => handleInputChange({ target: { name: "project_type", value: v } })}
+                    options={[
+                      { value: "residential", label: "Residential" },
+                      { value: "commercial", label: "Commercial" },
+                      { value: "industrial", label: "Industrial" },
+                      { value: "infrastructure", label: "Infrastructure" },
+                    ]} />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-[#374151] dark:text-[#d1d5db] mb-2">
                     Design Standard
                   </label>
-                  <select
-                    name="design_standard"
-                    value={formData.design_standard}
-                    onChange={handleInputChange}
-                    className="px-4 py-2 rounded-lg border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0A2F44]"
-                  >
-                    <option value="Eurocode">Eurocode</option>
-                    <option value="BS">British Standards</option>
-                    <option value="ACI">ACI</option>
-                  </select>
+                  <Dropdown value={formData.design_standard}
+                    onChange={(v) => handleInputChange({ target: { name: "design_standard", value: v } })}
+                    options={[
+                      { value: "Eurocode", label: "Eurocode" },
+                      { value: "BS", label: "British Standards" },
+                      { value: "ACI", label: "ACI" },
+                    ]} />
                 </div>
 
                 <div>
@@ -667,18 +662,9 @@ const ProjectDetail = () => {
                 <label className="block text-sm font-medium text-[#374151] dark:text-[#d1d5db] mb-2">
                   Select Organization
                 </label>
-                <select
-                  value={selectedTargetOrg}
-                  onChange={(e) => setSelectedTargetOrg(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0A2F44]"
-                >
-                  <option value="">Select an organization...</option>
-                  {userOrganizations.map((org) => (
-                    <option key={org.id} value={org.id}>
-                      {org.name} ({org.type})
-                    </option>
-                  ))}
-                </select>
+                <Dropdown value={selectedTargetOrg} onChange={(v) => setSelectedTargetOrg(v)} className="py-3"
+                  placeholder="Select an organization..."
+                  options={userOrganizations.map((org) => ({ value: org.id, label: `${org.name} (${org.type})` }))} />
               </div>
 
               <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 mb-6">

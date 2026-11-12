@@ -53,6 +53,11 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 import math
 
+try:
+    from engine.load_combination import uls_combination
+except ImportError:
+    from load_combination import uls_combination
+
 BAR_SPACINGS = [100, 125, 150, 175, 200, 225, 250]
 
 # EC2 moment/shear coefficients for a 1 m strip, w in kN/m (== kN/m^2 for a
@@ -87,6 +92,10 @@ class OneWayInput:
     live_load: float = 0.0
     additional_live_load: float = 0.0
     gamma_concrete: float = 25.0
+    wind_load: float = 0.0            # downward wind pressure on the slab, kN/m2
+    leading_action: str = "auto"     # auto | imposed | wind (EN 1990 6.10)
+    psi0_imposed: float = 0.7
+    psi0_wind: float = 0.6
 
 
 @dataclass
@@ -135,6 +144,7 @@ class OneWayResult:
     delta_s: float = 0.0
     beta_s: float = 0.0
     K_sys: float = 1.0
+    combo: dict = field(default_factory=dict)
 
 
 # ---------- material helpers ----------
@@ -200,7 +210,9 @@ def design_one_way_slab(inp: OneWayInput) -> OneWayResult:
     self_weight = inp.gamma_concrete * (h / 1000.0)
     g_k = self_weight + inp.floor_finish + inp.additional_dead_load
     q_k = inp.live_load + inp.additional_live_load
-    w_ed = 1.35 * g_k + 1.5 * q_k   # kN/m^2 == kN/m on a 1 m strip
+    # EN 1990 6.10, imposed or wind leading (wind 0 -> 1.35 g_k + 1.5 q_k)
+    combo = uls_combination(g_k, q_k, inp.wind_load, inp.leading_action, inp.psi0_imposed, inp.psi0_wind)
+    w_ed = combo["w_ed"]   # kN/m^2 == kN/m on a 1 m strip
 
     M_sag = coeffs["sag"] * w_ed * L ** 2
     M_hog = coeffs["hog"] * w_ed * L ** 2
@@ -293,4 +305,5 @@ def design_one_way_slab(inp: OneWayInput) -> OneWayResult:
         deflection_enhanced=deflection_enhanced,
         shear_status=shear_status, overall_status=overall, notes=notes,
         rho=rho, rho0=rho0, ld_basic=basic, delta_s=delta_s, beta_s=beta_s, K_sys=K_sys,
+        combo=combo,
     )

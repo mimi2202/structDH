@@ -1,3 +1,4 @@
+import Dropdown from '../components/Dropdown'
 import React, { useState, useEffect } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import ReactDOM from 'react-dom'
@@ -665,17 +666,9 @@ const OrganisationTeam = () => {
             </div>
 
             <div className="relative">
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value)}
-                className="px-4 py-2 rounded-xl border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0A2F44] cursor-pointer"
-              >
-                {roleFilterOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+              <div className="min-w-[180px]">
+                <Dropdown value={roleFilter} onChange={(v) => setRoleFilter(v)} options={roleFilterOptions} />
+              </div>
             </div>
           </div>
         </div>

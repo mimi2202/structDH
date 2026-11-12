@@ -41,6 +41,10 @@ import FoundationInput from './pages/FoundationInput';
 import FoundationResults from './pages/FoundationResults';
 import StaircaseInput from './pages/StaircaseInput';
 import StaircaseResults from './pages/StaircaseResults';
+import Settings from './pages/Settings';
+import Help from './pages/Help';
+import LoadCases from './pages/LoadCases';
+import Materials from './pages/Materials';
 
 function App() {
   return (
@@ -264,6 +268,35 @@ function App() {
                     <ProtectedRoute>
                       <MainLayout currentModule="staircase" breadcrumb="Staircase Design > Results">
                         <StaircaseResults />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  } />
+
+                  <Route path="/settings" element={
+                    <ProtectedRoute>
+                      <MainLayout currentModule="settings" breadcrumb="Settings">
+                        <Settings />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/load-cases" element={
+                    <ProtectedRoute>
+                      <MainLayout currentModule="loads" breadcrumb="Load Cases">
+                        <LoadCases />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/materials" element={
+                    <ProtectedRoute>
+                      <MainLayout currentModule="materials" breadcrumb="Materials">
+                        <Materials />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/help" element={
+                    <ProtectedRoute>
+                      <MainLayout currentModule="help" breadcrumb="Help">
+                        <Help />
                       </MainLayout>
                     </ProtectedRoute>
                   } />

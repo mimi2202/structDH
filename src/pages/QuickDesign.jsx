@@ -1,3 +1,4 @@
+import Dropdown from '../components/Dropdown'
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -432,28 +433,15 @@ const QuickDesign = () => {
                   <label className="block text-sm font-medium text-[#374151] dark:text-[#d1d5db] mb-2">
                     Concrete Grade
                   </label>
-                  <select
-                    value={formData.concreteGrade}
-                    onChange={(e) => setFormData({ ...formData, concreteGrade: e.target.value })}
-                    className="w-full px-4 py-2 rounded-xl border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white"
-                  >
-                    <option value="C25/30">C25/30</option>
-                    <option value="C30/37">C30/37</option>
-                    <option value="C35/45">C35/45</option>
-                    <option value="C40/50">C40/50</option>
-                  </select>
+                  <Dropdown value={formData.concreteGrade} onChange={(v) => setFormData({ ...formData, concreteGrade: v })}
+                    options={["C25/30", "C30/37", "C35/45", "C40/50"]} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-[#374151] dark:text-[#d1d5db] mb-2">
                     Reinforcement
                   </label>
-                  <select
-                    value={formData.steelGrade}
-                    onChange={(e) => setFormData({ ...formData, steelGrade: e.target.value })}
-                    className="w-full px-4 py-2 rounded-xl border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white"
-                  >
-                    <option value="B500">B500 (500 MPa)</option>
-                  </select>
+                  <Dropdown value={formData.steelGrade} onChange={(v) => setFormData({ ...formData, steelGrade: v })}
+                    options={[{ value: "B500", label: "B500 (500 MPa)" }]} />
                 </div>
               </div>
 

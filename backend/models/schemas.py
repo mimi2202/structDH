@@ -61,6 +61,12 @@ class LoadInput(BaseModel):
     live_load: float = Field(0, ge=0, description="Live load in kN/m²")
     additional_dead_load: float = Field(0, ge=0, description="Additional dead load in kN/m²")
     additional_live_load: float = Field(0, ge=0, description="Additional live load in kN/m²")
+    # Wind on the slab surface (downward pressure, e.g. roof slab), EN 1991-1-4.
+    # Combined with the imposed load by EN 1990 Eq. 6.10: one leading, the other
+    # accompanying with psi_0 (engine/load_combination.py). Used by the one-way
+    # and two-way slab engines only.
+    wind_load: float = Field(0, ge=0, description="Wind pressure on the slab, kN/m² (downward)")
+    leading_action: Literal["auto", "imposed", "wind"] = "auto"
 
 class DesignParameters(BaseModel):
     design_code: DesignCode = DesignCode.EC2
@@ -260,6 +266,8 @@ class SlabDesignResult(BaseModel):
     optimization_options: List[OptimizationOption]
     report: List[ReportSection] = []
     bar_selection: Optional[Dict] = None   # set when auto_bars was on
+    load_combination: Optional[Dict] = None   # EN 1990 6.10: leading / accompanying actions
+    two_way: Optional[Dict] = None   # two-way only: coefficients, the 4 moments, steel per location, edge continuity
 
 class TaskStatusResponse(BaseModel):
     task_id: str
@@ -296,21 +304,9 @@ class ContinuousSlabRequest(BaseModel):
     def check_spans(self):
         if any(s <= 0 for s in self.span_lengths):
             raise ValueError("All span lengths must be > 0")
-        # A one-way slab spanning more than ~4.5m stops being economical --
-        # deflection typically governs and fails well before bending does
-        # (see the 5-span worked example: a 6.0m span fails deflection at
-        # 48.0 actual vs 25.18 allowable L/d, while every span <= 4.5m passes).
-        # Beyond this, a two-way slab, a beam-and-slab system, or a flat slab
-        # is the more sensible choice -- flag it here rather than silently
-        # producing a design that's technically compliant but impractical.
-        oversized = [s for s in self.span_lengths if s > 4.5]
-        if oversized:
-            raise ValueError(
-                f"Span length(s) {oversized} m exceed the practical one-way slab limit of 4.5 m. "
-                f"Spans beyond 4.5 m are not economical as a one-way slab -- deflection governs and "
-                f"typically fails well before bending does. Consider a two-way slab, beam-and-slab "
-                f"system, or flat slab for this span instead."
-            )
+        # Spans over 4.5 m used to be refused here (a 422, so the page could
+        # not run). They are now designed; deflection is checked as for any
+        # span and the service adds a note to the report (economy, not safety).
         return self
     @model_validator(mode="after")
     def check_design_code_disabled(self):

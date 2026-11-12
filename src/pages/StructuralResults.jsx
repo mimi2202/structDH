@@ -2,15 +2,17 @@
 import React, { useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import DetailedReport from "../components/DetailedReport";
+import FullDocument from "../components/results/FullDocument";
+import { DIAGRAM } from "../components/results/diagramTheme";
+import SpanBMD from "../components/results/SpanBMD";
 import { exportElementToPdf } from "../utils/exportPdf";
 import { buildCoverHtml } from "../utils/reportCover";
-import { listDesigns, saveDesign, deleteDesign } from "../utils/savedDesigns";
+import DesignTopBar from "../components/results/DesignTopBar";
 import { downloadCsv, objectRows } from "../utils/exportCsv";
 import { slabAPI } from "../services/api";
 import {
-  FiHome, FiChevronRight, FiFilePlus, FiFolder, FiSave, FiMoreVertical,
   FiArrowLeft, FiArrowRight, FiCheck, FiDownload, FiFileText,
-  FiAlertTriangle, FiXCircle, FiShield, FiInfo, FiTrash2, FiX,
+  FiAlertTriangle, FiXCircle, FiShield, FiInfo,
 } from "react-icons/fi";
 
 /* ================================================================== */
@@ -27,7 +29,7 @@ const ROW_BORDER = "border-[#f1f5f9] dark:border-[#1f2937]";
 const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection", "Reinforcement Summary"];
 // what each tab holds, for the cover page of its PDF
 const TAB_NOTES = {
-  "Overview": "geometry, loads, design moments, reinforcement and the status of every check.",
+  "Overview": "the complete design document: summary, flexural, shear, deflection and reinforcement sections in full, and the full calculation report, numbered.",
   "Flexural Design": "the bending design in full for each direction: K, lever arm, tension and minimum steel, bars provided (EC2 6.1).",
   "Shear Design": "the shear check against the resistance without shear reinforcement (EC2 6.2.2).",
   "Deflection": "the span/depth deflection check in full (EC2 7.4.2).",
@@ -121,9 +123,7 @@ const StructuralResults = () => {
   const [tab, setTab] = useState("Overview");
   const [reportOpen, setReportOpen] = useState(false);
   const sheetRef = useRef(null);
-  const [openList, setOpenList] = useState(null);     // saved designs shown by "Open", null = closed
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [toast, setToast] = useState("");
+  const barRef = useRef(null);                          // top bar: Save / Open dialogs
   const [liveResult, setLiveResult] = useState(null);   // overrides location.state after a re-run
   const [rerunning, setRerunning] = useState(false);
   const [rerunError, setRerunError] = useState("");
@@ -187,30 +187,12 @@ const StructuralResults = () => {
   const D = deriveEC2({ summary, forces, reinf, shear, defl });
   const isPass = summary.status === "PASS" || !summary.status;
 
-  const ctx = { summary, forces, reinf, defl, shear, compliance, cost, D, isPass };
+  const tw = rawData.two_way || null;              // two-way: coefficients, 4 moments, steel per location
+  const lc = rawData.load_combination || null;     // EN 1990 6.10 leading / accompanying
+  const ctx = { summary, forces, reinf, defl, shear, compliance, cost, D, isPass, tw, lc };
 
-  const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
-
-  // Save / Open: designs kept in this browser (utils/savedDesigns.js)
-  const saveCurrent = () => {
-    const name = `${summary.slab_type || "Slab"} ${[summary.span_lx, summary.span_ly].filter((v) => v != null).join(" × ")} m, h ${summary.thickness} mm`;
-    try {
-      saveDesign("slab", {
-        name, status: summary.status,
-        subtitle: [summary.concrete_grade, summary.steel_grade, summary.continuity].filter(Boolean).join(" · "),
-        designResult: rawData, formData: originalFormData || null,
-      });
-      flash(`Saved: ${name}`);
-    } catch (e) {
-      flash(e.message);
-    }
-  };
-  const openSaved = (d) => {
-    setOpenList(null);
-    setLiveResult(null);
-    setTab("Overview");
-    navigate(location.pathname, { replace: true, state: { designResult: d.designResult, formData: d.formData } });
-  };
+  // Save / Open live in the top bar (components/results/DesignTopBar.jsx)
+  const saveCurrent = () => barRef.current?.save();
 
   // Export: the results and the calculation trace as a CSV for Excel
   const exportResults = () => downloadCsv(`Slab-${summary.slab_type || "results"}`, [
@@ -239,41 +221,25 @@ const StructuralResults = () => {
   return (
     <div className={`min-h-screen ${PAGE}`}>
       {/* top app bar */}
-      <header className="flex items-center justify-between border-b border-[#e2e8f0] dark:border-[#1f2937] bg-white dark:bg-[#0b0f19] px-4 py-2.5">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#0A2F44] text-white"><FiHome size={15} /></div>
-            <span className={`text-sm font-bold ${TXT_MAIN}`}>Struct Design Hub</span>
-          </div>
-          <nav className={`hidden md:flex items-center gap-1.5 text-[13px] ${TXT_SUB}`}>
-            <span>Slab Design</span><FiChevronRight size={13} />
-            <span>{summary.slab_type || "Slab"}</span><FiChevronRight size={13} />
-            <span className="font-medium text-[#0F172A] dark:text-white">Results</span>
-          </nav>
-        </div>
-        <div className="flex items-center gap-1">
-          <TopBtn icon={FiFilePlus} label="New" onClick={() => goToInput()} />
-          <TopBtn icon={FiFolder} label="Open" onClick={() => setOpenList(listDesigns("slab"))} />
-          <TopBtn icon={FiSave} label="Save" onClick={saveCurrent} />
-          <div className="relative">
-            <button onClick={() => setMenuOpen((o) => !o)} aria-label="More actions" className={`ml-1 rounded-md p-1.5 ${TXT_SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}><FiMoreVertical size={16} /></button>
-            {menuOpen && (
-              <div className={`absolute right-0 z-40 mt-1 w-52 ${CARD} py-1`} onMouseLeave={() => setMenuOpen(false)}>
-                {[
-                  ["Open saved design", () => setOpenList(listDesigns("slab"))],
-                  ["Save design", saveCurrent],
-                  ["Detailed report", () => setReportOpen(true)],
-                  ["Download report (PDF)", downloadPdf],
-                  ["Export results (CSV)", exportResults],
-                ].map(([label, fn]) => (
-                  <button key={label} onClick={() => { setMenuOpen(false); fn(); }}
-                    className={`block w-full px-3 py-2 text-left text-[13px] ${TXT_MAIN} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}>{label}</button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
+      <DesignTopBar ref={barRef} element="slab"
+        crumbs={[
+          { label: "Slab Design", onClick: goToInput },
+          { label: summary.slab_type || "Slab", onClick: goToInput },
+          { label: "Results" },
+        ]}
+        onNew={goToInput}
+        save={{
+          name: `${summary.slab_type || "Slab"} ${[summary.span_lx, summary.span_ly].filter((v) => v != null).join(" × ")} m, h ${summary.thickness} mm`,
+          status: summary.status,
+          subtitle: [summary.concrete_grade, summary.steel_grade, summary.continuity].filter(Boolean).join(" · "),
+          state: { designResult: rawData, formData: originalFormData || null },
+        }}
+        onOpened={() => { setLiveResult(null); setTab("Overview"); }}
+        menu={[
+          ["Detailed report", () => setReportOpen(true)],
+          ["Download report (PDF)", downloadPdf],
+          ["Export results (CSV)", exportResults],
+        ]} />
 
       <main ref={sheetRef} className="w-full px-4 py-5 sm:px-5 2xl:px-10">
         {/* page header */}
@@ -329,7 +295,15 @@ const StructuralResults = () => {
           ))}
         </div>
 
-        {tab === "Overview" && <OverviewTab ctx={ctx} />}
+        {tab === "Overview" && (
+          <FullDocument report={rawData.report} parts={[
+            { title: "Design Summary", node: <OverviewTab ctx={ctx} /> },
+            { title: "Flexural Design", node: <FlexuralTab ctx={ctx} /> },
+            { title: "Shear Design", node: <ShearTab ctx={ctx} /> },
+            { title: "Deflection", node: <DeflectionTab ctx={ctx} /> },
+            { title: "Reinforcement Summary", node: <ReinforcementTab ctx={ctx} /> },
+          ]} />
+        )}
         {tab === "Flexural Design" && <FlexuralTab ctx={ctx} />}
         {tab === "Shear Design" && <ShearTab ctx={ctx} />}
         {tab === "Deflection" && <DeflectionTab ctx={ctx} />}
@@ -346,43 +320,6 @@ const StructuralResults = () => {
           </div>
         </div>
       </main>
-
-      {toast && (
-        <div role="status" className="fixed bottom-4 left-1/2 z-[70] -translate-x-1/2 rounded-lg bg-[#0A2F44] px-4 py-2 text-[13px] text-white shadow-lg">
-          {toast}
-        </div>
-      )}
-
-      {openList && (
-        <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 p-4" onClick={() => setOpenList(null)}>
-          <div className={`${CARD} mt-16 w-full max-w-lg`} onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-[#e2e8f0] px-4 py-3 dark:border-[#1f2937]">
-              <h3 className={`text-sm font-bold ${TXT_MAIN}`}>Saved slab designs</h3>
-              <button onClick={() => setOpenList(null)} aria-label="Close" className={TXT_SUB}><FiX size={16} /></button>
-            </div>
-            {openList.length === 0 ? (
-              <p className={`px-4 py-6 text-center text-[13px] ${TXT_SUB}`}>No saved slab designs in this browser yet. Use Save on a result to keep it.</p>
-            ) : (
-              <ul className="max-h-[60vh] divide-y divide-[#e2e8f0] overflow-y-auto dark:divide-[#1f2937]">
-                {openList.map((d) => (
-                  <li key={d.id} className="flex items-center gap-3 px-4 py-3">
-                    <button onClick={() => openSaved(d)} className="min-w-0 flex-1 text-left">
-                      <div className={`truncate text-[13px] font-semibold ${TXT_MAIN}`}>{d.name}</div>
-                      <div className={`truncate text-[11px] ${TXT_SUB}`}>
-                        {new Date(d.saved_at).toLocaleString()} · {d.subtitle} ·{" "}
-                        <span className={d.status === "PASS" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>{d.status}</span>
-                      </div>
-                    </button>
-                    <button onClick={() => { deleteDesign("slab", d.id); setOpenList(listDesigns("slab")); }}
-                      aria-label={`Delete ${d.name}`} className={`rounded-md p-1.5 ${TXT_SUB} hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20`}><FiTrash2 size={14} /></button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <p className={`border-t border-[#e2e8f0] px-4 py-2 text-[11px] ${TXT_SUB} dark:border-[#1f2937]`}>Designs are kept in this browser only (up to 20).</p>
-          </div>
-        </div>
-      )}
 
       {rerunError && (
         <div className="fixed bottom-4 right-4 z-[70] rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-[13px] text-red-700 shadow-lg dark:border-red-700 dark:bg-red-900/40 dark:text-red-300">
@@ -410,7 +347,7 @@ const StructuralResults = () => {
 /*  TABS                                                              */
 /* ================================================================== */
 function OverviewTab({ ctx }) {
-  const { summary, forces, reinf, defl, shear, compliance, cost, isPass } = ctx;
+  const { summary, forces, reinf, defl, shear, compliance, cost, isPass, tw, lc } = ctx;
   return (
     <>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -418,11 +355,17 @@ function OverviewTab({ ctx }) {
         <DesignChecksCard compliance={compliance} summary={summary} isPass={isPass} />
         <SlabPreviewCard summary={summary} />
       </div>
-      <DesignForcesCard forces={forces} shear={shear} defl={defl} className="mt-4" />
+      <DesignForcesCard forces={forces} shear={shear} defl={defl} tw={tw} lc={lc} className="mt-4" />
+      {tw && (
+        <Card number="" title="Two-Way Moment Analysis: coefficients and the four moments" className="mt-4">
+          <TwoWayMomentsTable tw={tw} lc={lc} />
+          <div className="mt-4"><TwoWayMomentDiagrams tw={tw} /></div>
+        </Card>
+      )}
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <ReinforcementCard reinf={reinf} />
+            <ReinforcementCard reinf={reinf} tw={tw} />
             <DeflectionShearCard defl={defl} shear={shear} />
           </div>
           <LayoutCard summary={summary} reinf={reinf} />
@@ -437,11 +380,24 @@ function OverviewTab({ ctx }) {
 }
 
 function FlexuralTab({ ctx }) {
-  const { summary, forces, D } = ctx;
-  const rows = [
-    { loc: "Midspan — Sagging", dir: "Both Directions", layer: "Bottom", r: D.sagging, prov: D.bottomAs },
-    { loc: "Support — Hogging", dir: "Both Directions", layer: "Top", r: D.hogging, prov: D.topAs },
-  ];
+  const { summary, forces, D, tw, lc } = ctx;
+  // two-way: the backend's four locations (z = 0.9d, A_s,target = max(A_s,req, A_s,min));
+  // a discontinuous edge (M = 0) is left out
+  const rows = tw
+    ? (tw.locations || []).filter((l) => l.layer === "bottom" || l.M > 0).map((l) => {
+        const MRd = (tw.fyd * l.As_prov * tw.z) / 1e6;
+        const K = D.d ? (l.M * 1e6) / (1000 * D.d * D.d * D.fck) : 0;
+        return {
+          loc: l.strip === "short" ? (l.layer === "bottom" ? "Short span — midspan (+)" : "Short span — continuous edge (−)")
+                                   : (l.layer === "bottom" ? "Long span — midspan (+)" : "Long span — continuous edge (−)"),
+          dir: `Y${l.bar_diameter} @ ${l.spacing}`, layer: l.layer === "bottom" ? "Bottom" : "Top",
+          r: { M: l.M, MRd, util: MRd ? l.M / MRd : 0, K, z: tw.z, AsGov: l.As_target }, prov: l.As_prov,
+        };
+      })
+    : [
+        { loc: "Midspan — Sagging", dir: "Both Directions", layer: "Bottom", r: D.sagging, prov: D.bottomAs },
+        { loc: "Support — Hogging", dir: "Both Directions", layer: "Top", r: D.hogging, prov: D.topAs },
+      ];
   return (
     <>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -463,7 +419,13 @@ function FlexuralTab({ ctx }) {
         </div>
       </div>
 
-      <DesignForcesCard forces={forces} shear={ctx.shear} defl={ctx.defl} className="mt-4" />
+      <DesignForcesCard forces={forces} shear={ctx.shear} defl={ctx.defl} tw={tw} lc={lc} className="mt-4" />
+
+      {tw && (
+        <Card number="" title="Two-Way Moment Analysis: coefficients and the four moments" className="mt-4">
+          <TwoWayMomentsTable tw={tw} lc={lc} />
+        </Card>
+      )}
 
       <Card number="" title="Flexural Design Calculation — EN 1992-1-1 §6.1" className="mt-4">
         <p className={`mb-3 text-[11px] ${TXT_SUB}`}>
@@ -499,8 +461,9 @@ function FlexuralTab({ ctx }) {
         </div>
       </Card>
 
-      <Card number="" title="Bending Moment Diagram" className="mt-4">
-        <MomentDiagram sagging={D.sagging.M} hogging={D.hogging.M} continuity={summary.continuity} />
+      <Card number="" title={tw ? "Bending Moment Diagrams (each strip)" : "Bending Moment Diagram"} className="mt-4">
+        {tw ? <TwoWayMomentDiagrams tw={tw} />
+            : <MomentDiagram sagging={D.sagging.M} hogging={D.hogging.M} continuity={summary.continuity} />}
       </Card>
     </>
   );
@@ -612,8 +575,14 @@ function DeflectionTab({ ctx }) {
 }
 
 function ReinforcementTab({ ctx }) {
-  const { summary, forces, reinf, D } = ctx;
-  const checks = [
+  const { summary, forces, reinf, D, tw } = ctx;
+  const checks = tw ? [
+    ["Min. area (A_s,min)", `${f(tw.As_min, 0)} mm²/m`, (tw.locations || []).every((l) => !l.bar_diameter || l.As_prov >= tw.As_min)],
+    ["Max. spacing (2h ≤ 250 mm, EC2 9.3.1.1(3))", `${tw.max_spacing} mm`, (tw.locations || []).every((l) => !l.spacing || l.spacing <= tw.max_spacing)],
+    ...(tw.locations || []).filter((l) => l.layer === "bottom" || l.M > 0).map((l) => [
+      `Required A_s, ${l.strip} span ${l.layer === "bottom" ? "midspan" : "edge"}`, `${f(l.As_target, 0)} → Y${l.bar_diameter} @ ${l.spacing} = ${f(l.As_prov, 0)} mm²/m`, l.status === "PASS",
+    ]),
+  ] : [
     ["Min. area (A_s,min)", `${f(D.AsMin, 0)} mm²/m`, D.bottomAs >= D.AsMin],
     ["Max. area (A_s,max)", `${f(D.AsMax, 0)} mm²/m`, D.bottomAs <= D.AsMax],
     ["Max. spacing (3h ≤ 400 mm)", `${Math.min(3 * D.h, 400)} mm`, (Number(reinf.bottom_steel?.spacing) || 0) <= Math.min(3 * D.h, 400)],
@@ -625,7 +594,7 @@ function ReinforcementTab({ ctx }) {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <SlabSummaryCard summary={summary} />
         <div className="lg:col-span-2 space-y-4">
-          <ReinforcementCard reinf={reinf} />
+          <ReinforcementCard reinf={reinf} tw={tw} />
           <Card number="" title="Detailing & Adequacy Checks">
             <div className="space-y-2">
               {checks.map(([label, val, ok]) => (
@@ -707,7 +676,7 @@ function SlabPreviewCard({ summary }) {
   );
 }
 
-function DesignForcesCard({ forces, shear, defl, className = "" }) {
+function DesignForcesCard({ forces, shear, defl, tw, lc, className = "" }) {
   return (
     <Card number="4" title="Design Forces" className={className}>
       <div className="grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-3">
@@ -715,11 +684,27 @@ function DesignForcesCard({ forces, shear, defl, className = "" }) {
           <MiniHead>Loads</MiniHead>
           <Row label="Ultimate Load" value={`${num(forces.ultimate_load)} kN/m²`} />
           <Row label="Service Load" value={`${num(forces.service_load)} kN/m²`} />
+          {lc && lc.Wk > 0 && (
+            <>
+              <Row label="Leading action" value={lc.leading === "wind" ? "Wind" : "Imposed"} />
+              <Row label="Accompanying (× ψ₀)" value={lc.leading === "wind" ? `Imposed × ${lc.psi0_imposed}` : `Wind × ${lc.psi0_wind}`} />
+            </>
+          )}
         </div>
         <div>
           <MiniHead>Moment &amp; Shear (Factored)</MiniHead>
-          <Row label="Max Sagging Moment" value={`${num(forces.max_sagging_moment)} kNm/m`} />
-          <Row label="Max Hogging Moment" value={`${num(forces.max_hogging_moment)} kNm/m`} />
+          {tw ? (
+            ["x_pos", "x_neg", "y_pos", "y_neg"].map((k) => {
+              const l = twLoc(tw, k), neg = l.layer === "top";
+              return <Row key={k} label={`${l.strip === "short" ? "Short" : "Long"} span, ${neg ? "edge (−)" : "midspan (+)"}`}
+                value={neg && !(l.M > 0) ? "0 (discontinuous)" : `${neg ? "−" : "+"}${num(l.M)} kNm/m`} />;
+            })
+          ) : (
+            <>
+              <Row label="Max Sagging Moment" value={`${num(forces.max_sagging_moment)} kNm/m`} />
+              <Row label="Max Hogging Moment" value={`${num(forces.max_hogging_moment)} kNm/m`} />
+            </>
+          )}
           <Row label="Max Shear Force" value={`${num(forces.max_shear_force)} kN/m`} />
         </div>
         <div>
@@ -732,9 +717,15 @@ function DesignForcesCard({ forces, shear, defl, className = "" }) {
   );
 }
 
-function ReinforcementCard({ reinf }) {
+function ReinforcementCard({ reinf, tw }) {
   const b = reinf.bottom_steel || {}, t = reinf.top_steel || {};
-  const rows = [["Bottom Steel", b], ["Top Steel", t]];
+  const rows = tw
+    ? (tw.locations || []).map((l) => [
+        `${l.layer === "bottom" ? "Bottom" : "Top"}, ${l.strip} span`,
+        { direction: l.layer === "bottom" ? "midspan" : (l.bar_diameter ? "over continuous edges" : "edges discontinuous: none"),
+          bar_diameter: l.bar_diameter, spacing: l.spacing, area_provided: l.bar_diameter ? l.As_prov : null },
+      ])
+    : [["Bottom Steel", b], ["Top Steel", t]];
   return (
     <Card number="5" title="Reinforcement Design">
       <div className="overflow-hidden rounded-lg border border-[#e2e8f0] dark:border-[#1f2937]">
@@ -748,9 +739,9 @@ function ReinforcementCard({ reinf }) {
             {rows.map(([name, s]) => (
               <tr key={name} className={`border-t ${ROW_BORDER} text-[12px] ${TXT_SUB}`}>
                 <td className={`px-2.5 py-2 font-medium ${TXT_MAIN}`}>{name}<span className={`block text-[10px] ${TXT_SUB}`}>{s.direction || ""}</span></td>
-                <td className="px-2.5 py-2">Y{s.bar_diameter ?? "?"}</td>
-                <td className="px-2.5 py-2">{s.spacing ?? "?"} mm c/c</td>
-                <td className="px-2.5 py-2">{s.area_provided ?? "0"}</td>
+                <td className="px-2.5 py-2">{s.bar_diameter ? `Y${s.bar_diameter}` : "—"}</td>
+                <td className="px-2.5 py-2">{s.bar_diameter ? `${s.spacing} mm c/c` : "—"}</td>
+                <td className="px-2.5 py-2">{s.bar_diameter ? s.area_provided : "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -785,7 +776,9 @@ function LayoutCard({ summary, reinf }) {
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
         <div>
           <p className={`mb-1 text-center text-[11px] font-semibold uppercase tracking-wide ${TXT_SUB}`}>Top Reinforcement (Negative)</p>
-          <RebarLayout position="top" dia={t.bar_diameter} spacing={t.spacing} span={summary.span_lx} t={summary.thickness} />
+          {t.bar_diameter || t.bar_diameter === undefined
+            ? <RebarLayout position="top" dia={t.bar_diameter} spacing={t.spacing} span={summary.span_lx} t={summary.thickness} />
+            : <p className={`py-8 text-center text-[12px] ${TXT_SUB}`}>No top steel: no continuous edge (support moments are zero).</p>}
         </div>
         <div>
           <p className={`mb-1 text-center text-[11px] font-semibold uppercase tracking-wide ${TXT_SUB}`}>Bottom Reinforcement (Positive)</p>
@@ -840,7 +833,7 @@ function Card({ number, title, children, className = "" }) {
   return (
     <section className={`${CARD} ${className}`}>
       <header className="flex items-center gap-1.5 px-5 pt-4 pb-3">
-        <h3 className={`text-[11px] font-bold uppercase tracking-wide ${ACCENT}`}>{number ? `${number}. ` : ""}{title}</h3>
+        <h3 className={`doc-h text-[11px] font-bold uppercase tracking-wide ${ACCENT}`}>{number ? <span className="doc-n">{number}. </span> : null}{title}</h3>
         <FiInfo className="text-[#cbd5e1] dark:text-[#475569]" size={12} />
       </header>
       <div className="px-5 pb-5">{children}</div>
@@ -894,15 +887,6 @@ function Gauge({ label, value = 0 }) {
   );
 }
 
-function TopBtn({ icon, label, onClick }) {
-  const Icon = icon;
-  return (
-    <button onClick={onClick} className={`hidden sm:flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium ${TXT_SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}>
-      <Icon size={15} /> {label}
-    </button>
-  );
-}
-
 function OutlineBtn({ icon, label }) {
   const Icon = icon;
   return (
@@ -916,12 +900,6 @@ function OutlineBtn({ icon, label }) {
 /*  DIAGRAMS  (parametric, currentColor → dark-mode aware)            */
 /* ================================================================== */
 function MomentDiagram({ sagging = 0, hogging = 0, continuity = "" }) {
-  const peak = Math.max(Math.abs(sagging), Math.abs(hogging), 1);
-  const x0 = 50, x1 = 470, base = 95;
-  const scale = 55 / peak;
-  const sag = sagging * scale;
-  const dipPx = Math.min(2 * sag, 46);
-
   const c = String(continuity || "").toLowerCase().replace(/\s+/g, "_");
   const isCantilever = c.includes("cantilever");
   const isOneEnd = c.includes("one_end") || c.includes("one end");
@@ -944,35 +922,125 @@ function MomentDiagram({ sagging = 0, hogging = 0, continuity = "" }) {
     labelB = "Continuous";
   }
 
-  const hA = hogA * scale;
-  const hB = hogB * scale;
-
-  const labelFor = (v) => (v > 0 ? `-${f(v)}` : f(v));
-  const hogLabelA = labelFor(hogA);
-  const hogLabelB = labelFor(hogB);
-
   return (
     <div className="text-[#475569] dark:text-[#94a3b8]">
-      <svg viewBox="0 0 580 190" className="w-full">
-        <line x1={x0} y1={base} x2={x1} y2={base} stroke="currentColor" strokeWidth="1" />
-        <path
-          d={`M${x0},${base} L${x0},${base - hA} Q${(x0 + x1) / 2},${base + dipPx} ${x1},${base - hB} L${x1},${base} Z`}
-          fill="#ef4444" fillOpacity="0.12" stroke="#ef4444" strokeWidth="1.6"
-        />
-        <text x={x0} y={base - hA - 6} fontSize="10" fill="#ef4444" textAnchor="middle">{hogLabelA}</text>
-        <text x={x1} y={base - hB - 6} fontSize="10" fill="#ef4444" textAnchor="middle">{hogLabelB}</text>
-        {!isCantilever && (
-          <text x={(x0 + x1) / 2} y={base + dipPx + 16} fontSize="10" fill="#0ea5e9" textAnchor="middle">+{f(sagging)}</text>
-        )}
-        <text x={x0 - 6} y={base + 14} fontSize="9" fill="currentColor" textAnchor="end">{labelA}</text>
-        <text x={x1 + 6} y={base + 14} fontSize="9" fill="currentColor" textAnchor="start">{labelB}</text>
-        <text x={(x0 + x1) / 2} y={182} fontSize="9" fill="currentColor" fillOpacity="0.7" textAnchor="middle">Bending Moment (kNm/m)</text>
-      </svg>
+      <SpanBMD MA={hogA} MB={hogB} Mpos={isCantilever ? 0 : sagging} cantilever={isCantilever}
+        leftLabel={labelA} rightLabel={labelB} caption="Bending moment" />
       {(isOneEnd || isCantilever) && (
         <p className="mt-1 text-[10px] italic text-[#94a3b8] dark:text-[#64748b]">
           Left/right placement of the {isCantilever ? "fixed end" : "continuous end"} is a display convention, the engine doesn't track physical orientation, only the magnitude.
         </p>
       )}
+    </div>
+  );
+}
+
+/* ---------------- two-way: coefficients, the 4 moments, BMD per strip ----------------
+   tw = rawData.two_way from the backend. Short-span strip (M_sx) runs between the
+   long edges, long-span strip (M_sy) between the short edges. Sagging (+) is drawn
+   at midspan, hogging (-) only over a continuous edge; a discontinuous edge has zero
+   moment, so its negative coefficient is not used. */
+// continuous edge = hogging there (red, as in the BMD); discontinuous = grey dashed, M = 0
+const CONT = DIAGRAM.hogging, DISC = "#94a3b8";
+const twLoc = (tw, key) => (tw?.locations || []).find((l) => l.key === key) || {};
+
+function TwoWayMomentsTable({ tw, lc }) {
+  const rows = ["x_pos", "x_neg", "y_pos", "y_neg"].map((k) => twLoc(tw, k));
+  return (
+    <div>
+      <p className={`mb-2 text-[11px] ${TXT_SUB}`}>
+        M = &alpha; &times; w<sub>Ed</sub> &times; l<sub>x</sub>&sup2; = &alpha; &times; {f(tw.w_ed, 3)} &times; {f(tw.lx, 2)}&sup2;
+        {tw.coefficients_from_series ? " (all edges discontinuous: α is the equivalent value from the elastic plate series)" : ` (coefficients interpolated at lᵧ/lₓ = ${f(tw.r, 3)})`}
+        {lc && lc.Wk > 0 ? `; ${lc.leading} leading, ${lc.accompanying} accompanying` : ""}
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-[12px]">
+          <thead>
+            <tr className={`border-b ${ROW_BORDER} text-[10px] uppercase tracking-wide ${TXT_SUB}`}>
+              {["Moment", "Where it acts", "Coefficient α", "M (kNm/m)", "Steel"].map((h) => <th key={h} className="px-2 py-2 font-semibold">{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((l) => {
+              const neg = l.layer === "top";
+              const none = neg && !(l.M > 0);
+              return (
+                <tr key={l.key} className={`border-b ${ROW_BORDER}`}>
+                  <td className={`px-2 py-2 font-medium ${TXT_MAIN}`}>{l.strip === "short" ? "Mₛₓ" : "Mₛᵧ"} {neg ? "(−)" : "(+)"}</td>
+                  <td className={`px-2 py-2 ${TXT_SUB}`}>{l.strip === "short" ? "Short span" : "Long span"}, {neg ? "continuous edge" : "midspan"}</td>
+                  <td className={`px-2 py-2 ${TXT_SUB}`}>{none ? "not used" : `${neg ? "−" : "+"}${f(l.alpha, 4)}`}</td>
+                  <td className={`px-2 py-2 font-semibold ${neg ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}`}>{none ? "0 (edge discontinuous)" : `${neg ? "−" : "+"}${f(l.M)}`}</td>
+                  <td className={`px-2 py-2 ${TXT_MAIN}`}>{l.bar_diameter ? `${neg ? "Top" : "Bottom"} Y${l.bar_diameter} @ ${l.spacing}` : "none"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function TwoWayPlan({ tw }) {
+  const cx = tw.short_span_continuous_ends || 0, cy = tw.long_span_continuous_ends || 0;
+  // long edges (top/bottom here) end the short-span strip; short edges (left/right) end the long-span strip
+  const bottomC = cx >= 1, topC = cx >= 2, rightC = cy >= 1, leftC = cy >= 2;
+  const x0 = 60, x1 = 300, y0 = 30, y1 = 170, mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+  const edge = (on) => ({ stroke: on ? CONT : DISC, strokeWidth: 6, strokeDasharray: on ? "0" : "8 5" });
+  const lab = (on) => (on ? "CONTINUOUS" : "DISCONTINUOUS");
+  return (
+    <svg viewBox="0 0 360 215" className="w-full text-[#475569] dark:text-[#94a3b8]">
+      <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill="currentColor" fillOpacity="0.05" />
+      <line x1={x0} y1={y0} x2={x1} y2={y0} {...edge(topC)} />
+      <line x1={x0} y1={y1} x2={x1} y2={y1} {...edge(bottomC)} />
+      <line x1={x0} y1={y0} x2={x0} y2={y1} {...edge(leftC)} />
+      <line x1={x1} y1={y0} x2={x1} y2={y1} {...edge(rightC)} />
+      <text x={mx} y={y0 - 9} fontSize="9" textAnchor="middle" fill={topC ? CONT : DISC} fontWeight="700">{lab(topC)}</text>
+      <text x={mx} y={y1 + 16} fontSize="9" textAnchor="middle" fill={bottomC ? CONT : DISC} fontWeight="700">{lab(bottomC)}</text>
+      <text x={x0 - 12} y={my} fontSize="9" textAnchor="middle" fill={leftC ? CONT : DISC} fontWeight="700" transform={`rotate(-90 ${x0 - 12} ${my})`}>{lab(leftC)}</text>
+      <text x={x1 + 16} y={my} fontSize="9" textAnchor="middle" fill={rightC ? CONT : DISC} fontWeight="700" transform={`rotate(90 ${x1 + 16} ${my})`}>{lab(rightC)}</text>
+      {/* sections: A-A across the short span, B-B across the long span */}
+      <line x1={mx - 40} y1={y0 + 4} x2={mx - 40} y2={y1 - 4} stroke="currentColor" strokeDasharray="5 3" />
+      <text x={mx - 40} y={y0 + 16} fontSize="10" textAnchor="middle" fill="currentColor" fontWeight="700">A</text>
+      <text x={mx - 40} y={y1 - 8} fontSize="10" textAnchor="middle" fill="currentColor" fontWeight="700">A</text>
+      <line x1={x0 + 4} y1={my + 20} x2={x1 - 4} y2={my + 20} stroke="currentColor" strokeDasharray="5 3" />
+      <text x={x0 + 12} y={my + 16} fontSize="10" textAnchor="middle" fill="currentColor" fontWeight="700">B</text>
+      <text x={x1 - 12} y={my + 16} fontSize="10" textAnchor="middle" fill="currentColor" fontWeight="700">B</text>
+      <text x={mx + 40} y={my - 6} fontSize="10" textAnchor="middle" fill="currentColor" fontWeight="700">{f(tw.ly, 2)} m &times; {f(tw.lx, 2)} m</text>
+      <text x={mx} y={208} fontSize="9" textAnchor="middle" fill="currentColor">l&#x1D67; = {f(tw.ly, 2)} m (long span, horizontal) &middot; l&#x2093; = {f(tw.lx, 2)} m (short span, vertical)</text>
+    </svg>
+  );
+}
+
+function StripBMD({ title, span, Mpos = 0, Mneg = 0, contStart, contEnd, startLabel, endLabel }) {
+  return (
+    <div className="pdf-keep">
+      <p className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${TXT_SUB}`}>{title}</p>
+      <SpanBMD MA={contStart ? Mneg : 0} MB={contEnd ? Mneg : 0} Mpos={Mpos}
+        leftLabel={`${startLabel} (${contStart ? "continuous" : "discontinuous"})`}
+        rightLabel={`${endLabel} (${contEnd ? "continuous" : "discontinuous"})`}
+        caption={`span = ${f(span, 2)} m`} />
+    </div>
+  );
+}
+
+function TwoWayMomentDiagrams({ tw }) {
+  const cx = tw.short_span_continuous_ends || 0, cy = tw.long_span_continuous_ends || 0;
+  const xp = twLoc(tw, "x_pos").M || 0, xn = twLoc(tw, "x_neg").M || 0;
+  const yp = twLoc(tw, "y_pos").M || 0, yn = twLoc(tw, "y_neg").M || 0;
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div>
+        <p className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${TXT_SUB}`}>Plan and support conditions</p>
+        <TwoWayPlan tw={tw} />
+        <p className={`mt-1 text-[10px] ${TXT_SUB}`}>
+          <span style={{ color: CONT }}>&#9644; continuous</span>: hogging over the edge, top steel. <span style={{ color: DISC }}>&#9476; discontinuous</span>: support moment zero, no top steel.
+        </p>
+      </div>
+      <StripBMD title={"Section A–A: short span (Mₛₓ)"} span={tw.lx} Mpos={xp} Mneg={xn}
+        contStart={cx >= 1} contEnd={cx >= 2} startLabel="Bottom edge" endLabel="Top edge" />
+      <StripBMD title={"Section B–B: long span (Mₛᵧ)"} span={tw.ly} Mpos={yp} Mneg={yn}
+        contStart={cy >= 2} contEnd={cy >= 1} startLabel="Left edge" endLabel="Right edge" />
     </div>
   );
 }
@@ -983,10 +1051,10 @@ function ShearDiagram({ v = 0 }) {
     <div className="text-[#475569] dark:text-[#94a3b8]">
       <svg viewBox="0 0 520 170" className="w-full">
         <line x1={x0} y1={base} x2={x1} y2={base} stroke="currentColor" strokeWidth="1" />
-        <polygon points={`${x0},${base} ${x0},${base - h} ${(x0 + x1) / 2},${base}`} fill="#10b981" fillOpacity="0.15" stroke="#10b981" strokeWidth="1.4" />
-        <polygon points={`${(x0 + x1) / 2},${base} ${x1},${base + h} ${x1},${base}`} fill="#10b981" fillOpacity="0.15" stroke="#10b981" strokeWidth="1.4" />
-        <text x={x0} y={base - h - 6} fontSize="10" fill="#10b981" textAnchor="middle">+{f(v)}</text>
-        <text x={x1} y={base + h + 14} fontSize="10" fill="#10b981" textAnchor="middle">-{f(v)}</text>
+        <polygon points={`${x0},${base} ${x0},${base - h} ${(x0 + x1) / 2},${base}`} fill={DIAGRAM.shear} fillOpacity={DIAGRAM.fillOpacity} stroke={DIAGRAM.shear} strokeWidth="1.4" />
+        <polygon points={`${(x0 + x1) / 2},${base} ${x1},${base + h} ${x1},${base}`} fill={DIAGRAM.shear} fillOpacity={DIAGRAM.fillOpacity} stroke={DIAGRAM.shear} strokeWidth="1.4" />
+        <text x={x0} y={base - h - 6} fontSize="10" fill={DIAGRAM.shear} textAnchor="middle">+{f(v)}</text>
+        <text x={x1} y={base + h + 14} fontSize="10" fill={DIAGRAM.shear} textAnchor="middle">-{f(v)}</text>
         <text x={(x0 + x1) / 2} y={base + 60} fontSize="9" fill="currentColor" fillOpacity="0.7" textAnchor="middle">Shear Force (kN/m)</text>
       </svg>
     </div>
@@ -999,9 +1067,9 @@ function DeflectionDiagram({ defl = 0, span = 0 }) {
     <div className="text-[#475569] dark:text-[#94a3b8]">
       <svg viewBox="0 0 520 150" className="w-full">
         <line x1={x0} y1={top} x2={x1} y2={top} stroke="currentColor" strokeWidth="1" strokeDasharray="4 3" />
-        <path d={`M${x0},${top} Q${(x0 + x1) / 2},${top + drop * 2} ${x1},${top}`} fill="none" stroke="#6366f1" strokeWidth="2" />
+        <path d={`M${x0},${top} Q${(x0 + x1) / 2},${top + drop * 2} ${x1},${top}`} fill="none" stroke={DIAGRAM.deflection} strokeWidth="2" />
         <line x1={(x0 + x1) / 2} y1={top} x2={(x0 + x1) / 2} y2={top + drop} stroke="currentColor" strokeWidth="1" />
-        <text x={(x0 + x1) / 2 + 6} y={top + drop / 2} fontSize="10" fill="#6366f1">δ = {f(defl, 2)} mm</text>
+        <text x={(x0 + x1) / 2 + 6} y={top + drop / 2} fontSize="10" fill={DIAGRAM.deflection}>δ = {f(defl, 2)} mm</text>
         <text x={(x0 + x1) / 2} y={top + drop * 2 + 18} fontSize="9" fill="currentColor" fillOpacity="0.7" textAnchor="middle">Deflected shape · L = {f(span, 1)} m</text>
       </svg>
     </div>

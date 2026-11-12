@@ -308,14 +308,9 @@ def _choose_bar(As_req, bar_diameters):
 
 
 def design_continuous_slab(inp: ContinuousInput) -> ContinuousResult:
-    oversized = [L for L in inp.span_lengths_m if L > MAX_PRACTICAL_SPAN_M]
-    if oversized:
-        raise ValueError(
-            f"Span length(s) {oversized} m exceed the practical one-way slab limit of "
-            f"{MAX_PRACTICAL_SPAN_M} m. Deflection governs beyond this and typically fails "
-            f"well before bending does -- consider a two-way slab, beam-and-slab system, or "
-            f"flat slab instead."
-        )
+    # Spans over MAX_PRACTICAL_SPAN_M are designed (deflection is checked like any
+    # span); the service notes them in the report. They used to raise here, which
+    # stopped the design from running at all.
 
     b = 1000.0
     fck = _fck(inp.concrete_grade); fyk = _fyk(inp.steel_grade)
@@ -492,7 +487,6 @@ def design_continuous_slab(inp: ContinuousInput) -> ContinuousResult:
         f"(all-spans-loaded, alternate-span, and adjacent-pair-at-each-support), per UK/EC2 practice.",
         "Effective depth derived from the actually-selected governing bar diameter (iterative).",
         "Cover = clear cover input + 5 mm fixed detailing tolerance.",
-        f"Practical span limit enforced: no span may exceed {MAX_PRACTICAL_SPAN_M} m.",
         "Shear checked at the critical section d from the support face (EC2 6.2.1(8)), using the reduced shear.",
     ]
 

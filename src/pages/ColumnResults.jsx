@@ -4,11 +4,15 @@
 //   summary, materials, axial_by_level, levels[], detailing,
 //   interaction_x[], interaction_y[], failed_checks[], report[]
 // Report rows are { reference, calculation, output }.
+import Dropdown from "../components/Dropdown";
 import React, { useState, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { exportElementToPdf } from "../utils/exportPdf";
 import { buildCoverHtml } from "../utils/reportCover";
+import FullDocument from "../components/results/FullDocument";
+import { DIAGRAM } from "../components/results/diagramTheme";
+import DesignTopBar from "../components/results/DesignTopBar";
 import {
   FiArrowLeft, FiCheckCircle, FiXCircle, FiFileText, FiX,
   FiAlertTriangle, FiDownload, FiInfo,
@@ -33,7 +37,7 @@ const utilText = (u) => (u >= UTIL_CAP ? "no capacity" : n3(u));
 
 // tab key -> [label, what it holds], for the cover page of its PDF
 const TAB_COVER = {
-  overview: ["Overview", "section, reinforcement, governing level and the status of every check."],
+  overview: ["Overview", "the complete design document: summary, interaction diagram, per-level results and every code check in full, and the full calculation report, numbered."],
   interaction: ["Interaction", "the N-M interaction diagram for the section with the design actions plotted."],
   levels: ["Per level", "axial load, moments, slenderness and utilisation at every storey."],
   checks: ["Checks", "each code check in full for the selected storey (EC2 5.8, 6.1, 9.5)."],
@@ -84,6 +88,20 @@ export default function ColumnResults() {
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] px-4 py-6 sm:px-6 2xl:px-10 dark:bg-[#111827]">
+      <DesignTopBar element="column" className="mb-5"
+        crumbs={[
+          { label: "Column Design", to: "/column-input" },
+          { label: `${s.column_type ? s.column_type[0].toUpperCase() + s.column_type.slice(1) + " " : ""}Column`, to: "/column-input" },
+          { label: "Results" },
+        ]}
+        onNew={() => navigate("/column-input")}
+        save={{
+          name: `Column ${s.column_id || ""} ${s.b_mm} × ${s.h_mm} mm`.replace(/\s+/g, " "),
+          status: s.status,
+          subtitle: [s.concrete_grade, s.steel_grade, s.column_type].filter(Boolean).join(" · "),
+        }}
+        onOpened={() => { setTab("overview"); setLevelIdx(null); }}
+        menu={[["Detailed report", () => setShowReport(true)]]} />
       <div ref={sheetRef} className="w-full space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <button onClick={() => navigate("/column-input")} className={`flex items-center gap-2 text-sm ${SUB}`}>
@@ -172,19 +190,28 @@ export default function ColumnResults() {
           </div>
         )}
 
-        <div className="flex gap-1 border-b border-[#e2e8f0] dark:border-[#334155]">
+        <div className="flex gap-6 overflow-x-auto border-b border-[#e2e8f0] dark:border-[#334155]">
           {[["overview", "Overview"], ["interaction", "Interaction"],
             ["levels", "Per level"], ["checks", "Checks"]].map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)}
-              className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-2.5 text-[12px] font-semibold uppercase tracking-wide transition-colors ${
                 tab === k ? "border-[#0A2F44] text-[#0A2F44] dark:border-[#66a4c2] dark:text-[#66a4c2]"
-                          : `border-transparent ${SUB}`}`}>
+                          : `border-transparent ${SUB} hover:text-[#0F172A] dark:hover:text-white`}`}>
               {label}
             </button>
           ))}
         </div>
 
-        {tab === "overview" && <OverviewTab r={r} crit={crit} levels={levels} varies={varies} />}
+        {tab === "overview" && (
+          <FullDocument report={r.report} parts={[
+            { title: "Design Summary", node: <OverviewTab r={r} crit={crit} levels={levels} varies={varies} /> },
+            { title: "Interaction Diagram", node: <InteractionTab r={r} levels={levels} shown={shown} shownIdx={shownIdx}
+                setLevelIdx={setLevelIdx} isBiaxial={isBiaxial} varies={varies} /> },
+            { title: "Per Level", node: <LevelsTab r={r} isBiaxial={isBiaxial} /> },
+            { title: "Code Checks", node: <ChecksTab r={r} levels={levels} shown={shown} shownIdx={shownIdx}
+                setLevelIdx={setLevelIdx} varies={varies} /> },
+          ]} />
+        )}
         {tab === "interaction" && (
           <InteractionTab r={r} levels={levels} shown={shown} shownIdx={shownIdx}
             setLevelIdx={setLevelIdx} isBiaxial={isBiaxial} varies={varies} />
@@ -409,7 +436,7 @@ function safeRatio(ax) {
 
 function NMChart({ points, NEd, MEd, MRd }) {
   const dark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
-  const line = dark ? ACCENT_D : ACCENT;
+  const line = DIAGRAM.sagging;   // capacity envelope; design point in DIAGRAM.hogging (shared colours)
   const grid = dark ? "#334155" : "#e2e8f0";
   const tick = dark ? "#94a3b8" : "#64748b";
   const data = useMemo(
@@ -434,8 +461,8 @@ function NMChart({ points, NEd, MEd, MRd }) {
           contentStyle={{ fontSize: 12, background: dark ? "#1f2937" : "#fff", border: `1px solid ${grid}`, color: dark ? "#fff" : "#0F172A" }} />
         {NEd !== undefined && <ReferenceLine y={NEd} stroke="#94a3b8" strokeDasharray="4 3" />}
         <Scatter name="Capacity envelope" data={data} line={{ stroke: line, strokeWidth: 2 }} fill={line} shape={() => null} />
-        <Scatter name="M_Rd" data={capacity} fill="#1baf7a" shape="circle" />
-        <Scatter name="Design point" data={design} fill="#e34948" shape="cross" />
+        <Scatter name="M_Rd" data={capacity} fill={DIAGRAM.sagging} shape="circle" />
+        <Scatter name="Design point" data={design} fill={DIAGRAM.hogging} shape="cross" />
       </ScatterChart>
     </ResponsiveContainer>
   );
@@ -624,15 +651,9 @@ function AlternativesPanel({ shown }) {
       <div className="flex flex-wrap items-end gap-4">
         <div className="min-w-[220px] flex-1">
           <label className={LABEL}>Cage</label>
-          <select value={sel ? sel.bars : ""} onChange={(e) => setPick(e.target.value)}
-            className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3 py-2 font-mono text-sm text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#0A2F44] dark:border-[#334155] dark:bg-[#1f2937] dark:text-white">
-            {passing.map((o) => (
-              <option key={o.bars} value={o.bars}>
-                {o.bars} — As {n1(o.As_mm2)} mm², util {n3(o.utilisation)}
-                {o.bars === az.chosen ? "  (engine's choice)" : ""}
-              </option>
-            ))}
-          </select>
+          <Dropdown value={sel ? sel.bars : ""} onChange={(v) => setPick(v)} className="font-mono"
+            options={passing.map((o) => ({ value: o.bars,
+              label: `${o.bars} — As ${n1(o.As_mm2)} mm², util ${n3(o.utilisation)}${o.bars === az.chosen ? "  (engine's choice)" : ""}` }))} />
         </div>
         {sel && chosen && (
           <div className="flex gap-6">
@@ -787,7 +808,7 @@ function ReportModal({ r, onClose }) {
 function Panel({ title, children }) {
   return (
     <div className={CARD}>
-      <div className="border-b border-[#e2e8f0] px-5 py-3 dark:border-[#334155]"><h3 className={TITLE}>{title}</h3></div>
+      <div className="border-b border-[#e2e8f0] px-5 py-3 dark:border-[#334155]"><h3 className={`doc-h ${TITLE}`}>{title}</h3></div>
       <div className="p-5">{children}</div>
     </div>
   );

@@ -5,6 +5,9 @@ import { FiArrowLeft, FiCheckCircle, FiXCircle, FiFileText, FiX, FiAlertTriangle
 import { exportElementToPdf } from "../utils/exportPdf";
 import { buildCoverHtml } from "../utils/reportCover";
 import ReportSections from "../components/ReportSections";
+import FullDocument from "../components/results/FullDocument";
+import DesignTopBar from "../components/results/DesignTopBar";
+import { DIAGRAM, momentColor } from "../components/results/diagramTheme";
 
 const CARD = "bg-white dark:bg-[#1f2937] rounded-xl shadow-sm border border-[#e2e8f0] dark:border-[#334155]";
 const SUB = "text-[#64748b] dark:text-[#94a3b8]";
@@ -13,7 +16,7 @@ const TITLE = "text-[13px] font-bold uppercase tracking-wide text-[#0A2F44] dark
 
 const TABS = ["Overview", "Loading & Analysis", "Flexural Design", "Deflection & Shear", "Detailing & Schedule"];
 const TAB_NOTES = {
-  "Overview": "geometry, reactions, the reinforcement adopted and the status of every check.",
+  "Overview": "the complete design document: summary, loading and analysis, flexural, deflection and shear, detailing and bar schedule in full, and the full calculation report, numbered.",
   "Loading & Analysis": "loads on the flight and landing (EN 1991-1-1, EN 1990 Eq. 6.10) and the force-method analysis of the pinned frame: bending moment, shear and axial force.",
   "Flexural Design": "bottom steel for the span moment, top steel for the hogging moment at the landing junction, and distribution steel.",
   "Deflection & Shear": "span/effective depth check (EC2 7.4.2) and shear without shear reinforcement with the frame's axial force (EC2 6.2.2).",
@@ -64,8 +67,121 @@ export default function StaircaseResults() {
     status: r.status, report: r.report,
   }));
 
+  const overviewNode = (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Panel title="Geometry & Reactions">
+                <KV label="Risers × riser" value={`${g.n_risers} × ${g.riser_mm} = ${f2(g.rise_m * 1000, 0)} mm`} />
+                <KV label="Treads × going" value={`${g.n_treads} × ${g.going_mm} = ${f2(g.going_m * 1000, 0)} mm`} />
+                <KV label="Inclination α" value={`${f2(g.alpha_deg)}°`} />
+                <KV label="Flight span / sloping length" value={`${g.flight_span_m} / ${g.sloping_length_m} m`} />
+                <KV label="Landing" value={`${g.landing_m} m`} />
+                <KV label="VA / VC" value={`${f2(an.VA_kN, 3)} / ${f2(an.VC_kN, 3)} kN`} warn={an.VC_kN < 0 || an.VA_kN < 0} />
+                <KV label="Horizontal thrust H" value={`${f2(an.H_kN, 3)} kN`} strong />
+              </Panel>
+              <Panel title="Reinforcement Adopted (per m width)">
+                <KV label="Bottom (span)" value={`${bars(b)} (${f2(b.As_prov, 0)} mm²/m)`} strong />
+                <KV label="Top at B" value={t ? `${bars(t)} (${f2(t.As_prov, 0)} mm²/m)` : "not required (no hogging)"} strong={!!t} />
+                <KV label="Distribution" value={`${bars(ds)} (${f2(ds.As_prov, 0)} mm²/m)`} />
+                <KV label="Effective depth d" value={`${b.d_mm} mm`} />
+              </Panel>
+            </div>
+            <Panel title="Design Summary">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {r.checks.map((c) => <Chip key={c.check} label={c.check} ratio={c.ratio} ok={c.status === "OK"} />)}
+              </div>
+            </Panel>
+            <Panel title="Bending Moment (kNm/m)">
+              <FrameDiagram pts={an.diagram} field="M" g={g} />
+            </Panel>
+          </>
+  );
+  const loadingNode = (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Panel title="Loads (EN 1991-1-1)">
+                <KV label="Waist h × 25 (along slope)" value={`${f2(ld.g_waist, 3)} kN/m²`} />
+                <KV label="Steps ½ × R × 25" value={`${f2(ld.g_steps, 3)} kN/m²`} />
+                <KV label="Finishes" value={`${f2(ld.finishes, 3)} kN/m²`} />
+                <KV label="gk flight / landing" value={`${f2(ld.gk_flight, 3)} / ${f2(ld.gk_landing, 3)} kN/m²`} />
+                <KV label="qk" value={`${f2(ld.qk, 3)} kN/m²`} />
+                <KV label="n flight / landing (1.35gk + 1.5qk)" value={`${f2(ld.n_flight, 3)} / ${f2(ld.n_landing, 3)} kN/m`} strong />
+              </Panel>
+              <Panel title="Analysis Results">
+                <KV label="H (force method)" value={`${f2(an.H_kN, 3)} kN`} strong />
+                <KV label="VA / VC" value={`${f2(an.VA_kN, 3)} / ${f2(an.VC_kN, 3)} kN`} />
+                <KV label="Max sagging" value={`${f2(an.M_sag_kNm, 3)} kNm at x = ${f2(an.x_sag_m, 3)} m`} />
+                <KV label="Moment at B" value={`${f2(an.M_B_kNm, 3)} kNm`} />
+                <KV label="Max hogging" value={`${f2(an.M_hog_kNm, 3)} kNm`} />
+              </Panel>
+            </div>
+            <Panel title="Bending Moment (kNm/m, drawn on the tension side)"><FrameDiagram pts={an.diagram} field="M" g={g} /></Panel>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Panel title="Shear Force (kN/m)"><FrameDiagram pts={an.diagram} field="V" g={g} /></Panel>
+              <Panel title="Axial Force (kN/m, tension +)"><FrameDiagram pts={an.diagram} field="N" g={g} /></Panel>
+            </div>
+            <ReportSections report={r.report} match={/Geometry|Loading|Analysis/i} heading="Loading and analysis — calculation" />
+          </>
+  );
+  const flexuralNode = (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <FlexPanel title="Bottom Steel (span)" f={b} />
+              {t ? <FlexPanel title="Top Steel at B (hogging)" f={t} /> : (
+                <Panel title="Top Steel"><p className={`text-sm ${SUB}`}>No hogging moment anywhere: not required.</p></Panel>
+              )}
+            </div>
+            <Panel title="Distribution Steel (EC2 9.3.1.1(2))">
+              <KV label="Required ≥ 20% of main" value={`${f2(ds.As_req, 1)} mm²/m`} />
+              <KV label="Provided" value={`${bars(ds)} = ${f2(ds.As_prov, 0)} mm²/m`} strong />
+              <KV label="Spacing limit" value={`${ds.s_max} mm`} />
+              <KV label="Status" value={ds.status} warn={ds.status !== "OK"} />
+            </Panel>
+            <ReportSections report={r.report} match={/Flexural/i} heading="Flexural design — calculation" />
+          </>
+  );
+  const deflShearNode = (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Panel title="Deflection (span / depth)">
+                <KV label="ρ = As,prov / bd" value={f2(df.rho, 6)} />
+                <KV label={`Basic L/d (Eq. ${df.branch}, K = 1.0)`} value={f2(df.basic, 3)} />
+                <KV label="310/σs (cap 1.5)" value={`${f2(df.F3_raw, 3)} → ${f2(df.F3, 3)}`} />
+                <KV label="Allowable L/d" value={f2(df.allowable, 3)} strong />
+                <KV label="Actual L/d" value={`${f2(df.L_mm, 0)} / ${b.d_mm} = ${f2(df.actual, 3)}`} strong warn={df.status !== "OK"} />
+                <KV label="Status" value={df.status} warn={df.status !== "OK"} />
+              </Panel>
+              <Panel title="Shear (no shear reinforcement)">
+                <KV label="Governing section" value={`x = ${f2(sh.x, 3)} m (${sh.member})`} />
+                <KV label="V_Ed / N_Ed" value={`${f2(sh.VEd, 3)} / ${f2(sh.NEd, 3)} kN`} />
+                <KV label="σcp (compression +)" value={`${f2(sh.sigma_cp, 4)} N/mm²`} />
+                <KV label={`k / ρl (${sh.face} steel)`} value={`${f2(sh.k, 3)} / ${f2(sh.rho, 6)}`} />
+                <KV label="V_Rd,c" value={`${f2(sh.VRdc_kN, 3)} kN`} strong />
+                <KV label="V_Ed / V_Rd,c" value={`${f2(sh.ratio, 3)} ${sh.status}`} warn={sh.status !== "OK"} strong />
+              </Panel>
+            </div>
+            <ReportSections report={r.report} match={/Deflection|Shear/i} heading="Deflection and shear — calculation" />
+          </>
+  );
   return (
     <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#111827] px-4 sm:px-6 2xl:px-10 py-6">
+      <DesignTopBar element="staircase" className="mb-5"
+        crumbs={[
+          { label: "Staircase Design", to: "/staircase-design" },
+          { label: "Flight and Landing", to: "/staircase-design" },
+          { label: "Results" },
+        ]}
+        onNew={() => navigate("/staircase-design")}
+        save={{
+          name: `Staircase ${r.member_id || ""} ${f2(g.flight_span_m + g.landing_m, 3)} m span, waist ${g.thickness_mm} mm`.replace(/\s+/g, " "),
+          project: meta.project, status: r.status,
+          subtitle: [meta.concrete_grade, meta.steel_grade].filter(Boolean).join(" · "),
+        }}
+        onOpened={() => setTab("Overview")}
+        menu={[
+          ["Detailed report", () => setShowReport(true)],
+          ["Download report (PDF)", download],
+        ]} />
       <div ref={sheetRef} className="w-full space-y-5">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <button onClick={() => navigate("/staircase-design")} className={`flex items-center gap-2 text-sm ${SUB}`}>
@@ -117,104 +233,20 @@ export default function StaircaseResults() {
         <TabBar tab={tab} setTab={setTab} />
 
         {tab === "Overview" && (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Panel title="Geometry & Reactions">
-                <KV label="Risers × riser" value={`${g.n_risers} × ${g.riser_mm} = ${f2(g.rise_m * 1000, 0)} mm`} />
-                <KV label="Treads × going" value={`${g.n_treads} × ${g.going_mm} = ${f2(g.going_m * 1000, 0)} mm`} />
-                <KV label="Inclination α" value={`${f2(g.alpha_deg)}°`} />
-                <KV label="Flight span / sloping length" value={`${g.flight_span_m} / ${g.sloping_length_m} m`} />
-                <KV label="Landing" value={`${g.landing_m} m`} />
-                <KV label="VA / VC" value={`${f2(an.VA_kN, 3)} / ${f2(an.VC_kN, 3)} kN`} warn={an.VC_kN < 0 || an.VA_kN < 0} />
-                <KV label="Horizontal thrust H" value={`${f2(an.H_kN, 3)} kN`} strong />
-              </Panel>
-              <Panel title="Reinforcement Adopted (per m width)">
-                <KV label="Bottom (span)" value={`${bars(b)} (${f2(b.As_prov, 0)} mm²/m)`} strong />
-                <KV label="Top at B" value={t ? `${bars(t)} (${f2(t.As_prov, 0)} mm²/m)` : "not required (no hogging)"} strong={!!t} />
-                <KV label="Distribution" value={`${bars(ds)} (${f2(ds.As_prov, 0)} mm²/m)`} />
-                <KV label="Effective depth d" value={`${b.d_mm} mm`} />
-              </Panel>
-            </div>
-            <Panel title="Design Summary">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                {r.checks.map((c) => <Chip key={c.check} label={c.check} ratio={c.ratio} ok={c.status === "OK"} />)}
-              </div>
-            </Panel>
-            <Panel title="Bending Moment (kNm/m)">
-              <FrameDiagram pts={an.diagram} field="M" g={g} />
-            </Panel>
-          </>
+          <FullDocument report={r.report} parts={[
+            { title: "Design Summary", node: overviewNode },
+            { title: "Loading & Analysis", node: loadingNode },
+            { title: "Flexural Design", node: flexuralNode },
+            { title: "Deflection & Shear", node: deflShearNode },
+            { title: "Detailing & Schedule", node: <DetailingTab r={r} /> },
+          ]} />
         )}
 
-        {tab === "Loading & Analysis" && (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Panel title="Loads (EN 1991-1-1)">
-                <KV label="Waist h × 25 (along slope)" value={`${f2(ld.g_waist, 3)} kN/m²`} />
-                <KV label="Steps ½ × R × 25" value={`${f2(ld.g_steps, 3)} kN/m²`} />
-                <KV label="Finishes" value={`${f2(ld.finishes, 3)} kN/m²`} />
-                <KV label="gk flight / landing" value={`${f2(ld.gk_flight, 3)} / ${f2(ld.gk_landing, 3)} kN/m²`} />
-                <KV label="qk" value={`${f2(ld.qk, 3)} kN/m²`} />
-                <KV label="n flight / landing (1.35gk + 1.5qk)" value={`${f2(ld.n_flight, 3)} / ${f2(ld.n_landing, 3)} kN/m`} strong />
-              </Panel>
-              <Panel title="Analysis Results">
-                <KV label="H (force method)" value={`${f2(an.H_kN, 3)} kN`} strong />
-                <KV label="VA / VC" value={`${f2(an.VA_kN, 3)} / ${f2(an.VC_kN, 3)} kN`} />
-                <KV label="Max sagging" value={`${f2(an.M_sag_kNm, 3)} kNm at x = ${f2(an.x_sag_m, 3)} m`} />
-                <KV label="Moment at B" value={`${f2(an.M_B_kNm, 3)} kNm`} />
-                <KV label="Max hogging" value={`${f2(an.M_hog_kNm, 3)} kNm`} />
-              </Panel>
-            </div>
-            <Panel title="Bending Moment (kNm/m, drawn on the tension side)"><FrameDiagram pts={an.diagram} field="M" g={g} /></Panel>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Panel title="Shear Force (kN/m)"><FrameDiagram pts={an.diagram} field="V" g={g} /></Panel>
-              <Panel title="Axial Force (kN/m, tension +)"><FrameDiagram pts={an.diagram} field="N" g={g} /></Panel>
-            </div>
-            <ReportSections report={r.report} match={/Geometry|Loading|Analysis/i} heading="Loading and analysis — calculation" />
-          </>
-        )}
+        {tab === "Loading & Analysis" && loadingNode}
 
-        {tab === "Flexural Design" && (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <FlexPanel title="Bottom Steel (span)" f={b} />
-              {t ? <FlexPanel title="Top Steel at B (hogging)" f={t} /> : (
-                <Panel title="Top Steel"><p className={`text-sm ${SUB}`}>No hogging moment anywhere: not required.</p></Panel>
-              )}
-            </div>
-            <Panel title="Distribution Steel (EC2 9.3.1.1(2))">
-              <KV label="Required ≥ 20% of main" value={`${f2(ds.As_req, 1)} mm²/m`} />
-              <KV label="Provided" value={`${bars(ds)} = ${f2(ds.As_prov, 0)} mm²/m`} strong />
-              <KV label="Spacing limit" value={`${ds.s_max} mm`} />
-              <KV label="Status" value={ds.status} warn={ds.status !== "OK"} />
-            </Panel>
-            <ReportSections report={r.report} match={/Flexural/i} heading="Flexural design — calculation" />
-          </>
-        )}
+        {tab === "Flexural Design" && flexuralNode}
 
-        {tab === "Deflection & Shear" && (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Panel title="Deflection (span / depth)">
-                <KV label="ρ = As,prov / bd" value={f2(df.rho, 6)} />
-                <KV label={`Basic L/d (Eq. ${df.branch}, K = 1.0)`} value={f2(df.basic, 3)} />
-                <KV label="310/σs (cap 1.5)" value={`${f2(df.F3_raw, 3)} → ${f2(df.F3, 3)}`} />
-                <KV label="Allowable L/d" value={f2(df.allowable, 3)} strong />
-                <KV label="Actual L/d" value={`${f2(df.L_mm, 0)} / ${b.d_mm} = ${f2(df.actual, 3)}`} strong warn={df.status !== "OK"} />
-                <KV label="Status" value={df.status} warn={df.status !== "OK"} />
-              </Panel>
-              <Panel title="Shear (no shear reinforcement)">
-                <KV label="Governing section" value={`x = ${f2(sh.x, 3)} m (${sh.member})`} />
-                <KV label="V_Ed / N_Ed" value={`${f2(sh.VEd, 3)} / ${f2(sh.NEd, 3)} kN`} />
-                <KV label="σcp (compression +)" value={`${f2(sh.sigma_cp, 4)} N/mm²`} />
-                <KV label={`k / ρl (${sh.face} steel)`} value={`${f2(sh.k, 3)} / ${f2(sh.rho, 6)}`} />
-                <KV label="V_Rd,c" value={`${f2(sh.VRdc_kN, 3)} kN`} strong />
-                <KV label="V_Ed / V_Rd,c" value={`${f2(sh.ratio, 3)} ${sh.status}`} warn={sh.status !== "OK"} strong />
-              </Panel>
-            </div>
-            <ReportSections report={r.report} match={/Deflection|Shear/i} heading="Deflection and shear — calculation" />
-          </>
-        )}
+        {tab === "Deflection & Shear" && deflShearNode}
 
         {tab === "Detailing & Schedule" && <DetailingTab r={r} />}
 
@@ -259,11 +291,6 @@ function FrameDiagram({ pts, field, g }) {
   const nrm = (p) => (p.member === "flight" ? [-s, -c] : [0, -1]);
   const pos = (p) => { const [nx, ny] = nrm(p); const v = p[field] * off; return [X(p.x + nx * v), Y(p.y + ny * v)]; };
   const fl = pts.filter((p) => p.member === "flight"), la = pts.filter((p) => p.member === "landing");
-  const area = (arr) => {
-    if (!arr.length) return "";
-    const a = arr[0], z = arr[arr.length - 1];
-    return [`${X(a.x)},${Y(a.y)}`, ...arr.map((p) => pos(p).join(",")), `${X(z.x)},${Y(z.y)}`].join(" ");
-  };
   // labelled values: ends of each member and the extreme
   const hi = pts.reduce((m, p) => (p[field] > m[field] ? p : m), pts[0]);
   const lo = pts.reduce((m, p) => (p[field] < m[field] ? p : m), pts[0]);
@@ -273,10 +300,19 @@ function FrameDiagram({ pts, field, g }) {
     .filter((p, i, arr) => arr.findIndex((q) => Math.abs(q.x - p.x) < 1e-6 && Math.abs(q[field] - p[field]) < 1e-3) === i)
     .filter((p) => Math.abs(p[field]) > maxV * 0.02);
   const unit = field === "M" ? "kNm" : "kN";
+  // shared colours: sagging blue / hogging red, shear green, axial amber
+  const colorOf = (v) => (field === "M" ? momentColor(v) : field === "V" ? DIAGRAM.shear : DIAGRAM.axial);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
-      <polygon points={area(fl)} fill="#0A2F44" fillOpacity="0.12" stroke="#0A2F44" strokeWidth="1" />
-      <polygon points={area(la)} fill="#0A2F44" fillOpacity="0.12" stroke="#0A2F44" strokeWidth="1" />
+      {[fl, la].map((arr) => arr.slice(1).map((p, i) => {
+        const q = arr[i], [ax, ay] = pos(q), [bx, by] = pos(p), c = colorOf((q[field] + p[field]) / 2);
+        return (
+          <g key={`${p.member}${i}`}>
+            <polygon points={`${X(q.x)},${Y(q.y)} ${ax},${ay} ${bx},${by} ${X(p.x)},${Y(p.y)}`} fill={c} fillOpacity={DIAGRAM.fillOpacity} />
+            <line x1={ax} y1={ay} x2={bx} y2={by} stroke={c} strokeWidth="1.4" />
+          </g>
+        );
+      }))}
       <polyline points={`${X(0)},${Y(Hf)} ${X(L1)},${Y(0)} ${X(L1 + L2)},${Y(0)}`} fill="none" stroke="#0F172A" strokeWidth="2.5" />
       {[[0, Hf], [L1 + L2, 0]].map(([x, y], i) => (
         <polygon key={i} points={`${X(x)},${Y(y)} ${X(x) - 8},${Y(y) + 14} ${X(x) + 8},${Y(y) + 14}`} fill="none" stroke="#2563eb" strokeWidth="2" />
@@ -286,7 +322,7 @@ function FrameDiagram({ pts, field, g }) {
       <text x={X(L1 + L2) + 10} y={Y(0) - 6} fontSize="13" fontWeight="700" fill="#0F172A">C</text>
       {labels.map((p, i) => {
         const [px, py] = pos(p);
-        return <text key={i} x={px} y={py + (p[field] > 0 ? 13 : -5)} fontSize="11" fill="#b91c1c" textAnchor="middle">{f2(p[field], 3)} {unit}</text>;
+        return <text key={i} x={px} y={py + (p[field] > 0 ? 13 : -5)} fontSize="11" fill={colorOf(p[field])} textAnchor="middle">{f2(p[field], 3)} {unit}</text>;
       })}
     </svg>
   );
@@ -309,7 +345,7 @@ function ReportModal({ r, onClose }) {
 function Panel({ title, children }) {
   return (
     <div className={CARD}>
-      <div className="border-b border-[#e2e8f0] dark:border-[#334155] px-5 py-3"><h3 className={TITLE}>{title}</h3></div>
+      <div className="border-b border-[#e2e8f0] dark:border-[#334155] px-5 py-3"><h3 className={`doc-h ${TITLE}`}>{title}</h3></div>
       <div className="p-5">{children}</div>
     </div>
   );

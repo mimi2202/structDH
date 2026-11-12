@@ -1,4 +1,5 @@
 // src/pages/OrganizationOverview.jsx
+import Dropdown from '../components/Dropdown'
 import React, { useState, useEffect } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
@@ -587,18 +588,9 @@ const OrganizationOverview = () => {
               <label className="block text-sm font-medium text-[#374151] dark:text-[#d1d5db] mb-2">
                 Select Organization
               </label>
-              <select
-                value={selectedMoveOrg}
-                onChange={(e) => setSelectedMoveOrg(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0A2F44]"
-              >
-                <option value="">Select an organization...</option>
-                {userOrgs.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name} ({org.type})
-                  </option>
-                ))}
-              </select>
+              <Dropdown value={selectedMoveOrg} onChange={(v) => setSelectedMoveOrg(v)} className="py-3"
+                placeholder="Select an organization..."
+                options={userOrgs.map((org) => ({ value: org.id, label: `${org.name} (${org.type})` }))} />
             </div>
 
             <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 mb-6">

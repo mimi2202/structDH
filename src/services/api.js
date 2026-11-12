@@ -70,7 +70,10 @@ export const slabAPI = {
         floor_finish: parseFloat(formData.floorFinish),
         live_load: parseFloat(formData.liveLoad),
         additional_dead_load: parseFloat(formData.additionalDeadLoad),
-        additional_live_load: parseFloat(formData.additionalLiveLoad)
+        additional_live_load: parseFloat(formData.additionalLiveLoad),
+        // EN 1990 6.10: imposed or wind leading, the other accompanying (psi_0)
+        wind_load: parseFloat(formData.windLoad) || 0,
+        leading_action: formData.leadingAction || "auto",
       },
       design_params: {
         design_code: formData.designCode,
@@ -111,6 +114,13 @@ export const slabAPI = {
   getRates: async (region = 'Nigeria') => {
     const response = await fetch(`${API_BASE}/api/rates/${region}`);
     if (!response.ok) throw new Error('Failed to fetch rates');
+    return response.json();
+  },
+
+  // regions in backend/engine/rates_db.json (the cost rates of the slab cost breakdown)
+  getRegions: async () => {
+    const response = await fetch(`${API_BASE}/api/rates/`);
+    if (!response.ok) throw new Error('Failed to fetch regions');
     return response.json();
   }
 };

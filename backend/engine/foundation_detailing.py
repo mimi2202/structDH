@@ -22,6 +22,11 @@ Buildings", Ubani O. U., EC2), sections 9.1.2, 9.1.6, 9.10 and 10.2.
     bottom mat, projecting above the footing by the soil depth plus the
     EC2 8.7.3 lap l0 = alpha6 l_b,rqd (alpha6 = 1.5) >= max(0.3 alpha6
     l_b,rqd, 15 phi, 200) (book 9.1.6) unless a projection is entered.
+  - Links to the starters (book 9.10 drawing, 10.2 mark 03): closed links
+    over the column stub (footing top to the start of the lap), number =
+    floor(stub/spacing) + 1 (book: 1100/200 -> 6, 1200/200 -> 7), spacing
+    200 mm but not more than EC2 9.5.3(3), sides = column - 2 column covers,
+    cut length = 2(A + B) + 2 x 50 hooks.
   - Mass per metre from the book's table (0.395, 0.616, 0.888, 1.579,
     2.466 kg/m ...); pieces = 12 m stock lengths, ceil(total length / 12).
 """
@@ -37,6 +42,8 @@ UNIT_MASS = {6: 0.222, 8: 0.395, 10: 0.616, 12: 0.888, 16: 1.579, 20: 2.466,
 STOCK_LENGTH_M = 12.0
 LEG_MIN_MM = 150      # book 10.2, marks 01/02
 STARTER_FOOT_MM = 300  # book 10.2, mark 05
+LINK_SPACING_MM = 200  # book 9.10 (6-Y8-03-200 / 7-Y8-03-200)
+LINK_HOOK_MM = 50      # book 10.2, mark 03
 
 
 def unit_mass(phi: float) -> float:
@@ -137,6 +144,26 @@ def starter_row(mark: str, phi: float, n_per_col: int, n_cols: int, n_members: i
     row = schedule_row(mark, phi, n_per_col * n_cols, n_members, "11",
                        {"A": vertical, "B": STARTER_FOOT_MM}, "starter bars")
     row["callout"] = f"{n_per_col * n_cols}-Y{phi:.0f}-{mark}"
+    return row
+
+
+def link_spacing(starter_phi: float, b_min: float) -> float:
+    """Book 9.10 uses 200 mm; not more than EC2 9.5.3(3) s_cl,tmax =
+    min(20 phi, least column dimension, 400)."""
+    return math.floor(min(LINK_SPACING_MM, 20 * starter_phi, b_min, 400) / 25) * 25
+
+
+def link_row(mark: str, phi: float, n_per_col: int, n_cols: int, n_members: int,
+             a_mm: float, b_mm: float, spacing: float) -> Dict:
+    """Closed link, book 10.2 mark 03 (BS 8666 shape 51): cut length =
+    2(A + B) + two 50 mm hooks (book: 160 x 160 -> 0.74 m)."""
+    row = schedule_row(mark, phi, n_per_col * n_cols, n_members, "51",
+                       {"A": a_mm, "B": b_mm, "C": LINK_HOOK_MM}, "links to the starter bars")
+    length_m = (2 * (a_mm + b_mm) + 2 * LINK_HOOK_MM) / 1000
+    total = length_m * row["n_bars"] * n_members
+    row.update(length_m=round(length_m, 3), total_length_m=round(total, 3),
+               mass_kg=round(total * unit_mass(phi), 2), spacing_mm=spacing,
+               callout=f"{n_per_col}-Y{phi:.0f}-{mark}-{spacing:.0f}")
     return row
 
 

@@ -94,6 +94,11 @@ def _calculate_continuous_slab(request: ContinuousSlabRequest) -> ContinuousSlab
     )
 
     res = design_continuous_slab(inp)
+    # Spans over 4.5 m are designed (was a 422): deflection decides; flag it.
+    long_spans = [L for L in request.span_lengths if L > 4.5]
+    if long_spans:
+        res.notes.append(f"Span(s) {long_spans} m exceed 4.5 m, the usual economic limit for a one-way slab: "
+                         f"deflection tends to govern; a two-way, beam-and-slab or flat slab may be more economical.")
     b = 1000.0
     dfc_rows, dfc_checks = _durability_fire_crack(request, res)
     overall = "FAIL" if (res.overall_status == "FAIL" or any(c.status == "FAIL" for c in dfc_checks)) else res.overall_status
@@ -404,7 +409,7 @@ def _build_report(request, res, dfc_rows, dfc_checks, overall):
         R("Tolerance", "a fixed 5 mm fixing/detailing allowance is added to the clear cover specified above -- this is not user-editable", "+5 mm"),
         R("Cover used", f"Cc,used = Cc,input + 5 mm = {request.clear_cover:.0f} + 5", f"Cc = {res.cover_mm:.0f} mm"),
         R("EC2 §6.1", f"d = h − Cc − φ/2 = {request.geometry_thickness:.0f} − {res.cover_mm:.0f} − φ/2", f"d = {res.d_mm:.0f} mm"),
-        R("Spans", f"{res.n_spans} spans: {', '.join(f'{L:.2f}' for L in request.span_lengths)} m (each ≤ 4.5 m, the practical one-way slab limit)", f"{_enum(request.start_support)}–{_enum(request.end_support)}"),
+        R("Spans", f"{res.n_spans} spans: {', '.join(f'{L:.2f}' for L in request.span_lengths)} m (4.5 m is the usual economic limit for a one-way slab)", f"{_enum(request.start_support)}–{_enum(request.end_support)}"),
     ]})
 
     # ---------------- 2. Materials ----------------

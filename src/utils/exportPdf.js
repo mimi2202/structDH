@@ -20,6 +20,7 @@
 // mark rows (not whole sections) as break-inside: avoid so a single row's
 // three columns can't split apart while the section as a whole still flows
 // across pages normally.
+import Plotly from "plotly.js/dist/plotly";
 
 let styleInjected = false;
 
@@ -128,7 +129,19 @@ function injectPrintStyle() {
 
   #__print_sheet img.pdf-chart { display: block !important; width: 100% !important; height: auto !important; break-inside: avoid !important; }
 
-  @page { size: A4; margin: 12mm; }
+  /* full document (Overview, components/results/FullDocument.jsx): every
+     numbered part starts on a new page, its heading kept with what follows */
+  #__print_sheet .pdf-part + .pdf-part { break-before: page !important; page-break-before: always !important; }
+  #__print_sheet .pdf-part > h2 { break-after: avoid !important; page-break-after: avoid !important; }
+  #__print_sheet svg, #__print_sheet .pdf-keep { break-inside: avoid !important; page-break-inside: avoid !important; }
+  /* a results card holding a drawing (its heading is .doc-h) is kept whole,
+     so the heading never ends a page with the drawing on the next one */
+  #__print_sheet :is(div, section):has(> * > .doc-h):has(svg, img.pdf-chart) { break-inside: avoid !important; page-break-inside: avoid !important; }
+
+  @page {
+    size: A4; margin: 12mm 12mm 16mm;
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 8pt; color: #64748b; }
+  }
 }
 /* the sheet only exists for printing; keep it off screen while charts are captured */
 @media screen { #__print_sheet { display: none !important; } }`;
@@ -141,8 +154,15 @@ function injectPrintStyle() {
 // Charts drawn on a <canvas> do not survive the innerHTML copy (a copied
 // canvas is empty, and a WebGL canvas such as the Plotly 3D soil-pressure
 // surface cannot even be read back with toDataURL). So each chart is turned
-// into a PNG from the live page and put in place of its copy. Plotly is only
-// loaded when the page has a Plotly chart (same build react-plotly.js uses).
+// into a PNG from the live page and put in place of its copy.
+//
+// Plotly is imported statically (the same build react-plotly.js draws with,
+// already in the bundle). It used to be a dynamic import() at click time;
+// when that request failed (dev server with re-optimised deps) the error was
+// swallowed, the PDF printed with an empty chart box, and the copied
+// colour-bar SVG, still position:absolute, landed on the cover page.
+// A chart that cannot be captured is now replaced by a line of text, never
+// left behind half-copied.
 async function snapshotCharts(src, sheet) {
   const toImg = (url, maxW) => {
     const img = document.createElement("img");
@@ -156,17 +176,22 @@ async function snapshotCharts(src, sheet) {
   const plots = [...src.querySelectorAll(".js-plotly-plot")];
   if (plots.length) {
     const copies = [...sheet.querySelectorAll(".js-plotly-plot")];
-    try {
-      const Plotly = (await import("plotly.js/dist/plotly")).default;
-      await Promise.all(plots.map(async (gd, i) => {
-        if (!copies[i]) return;
+    await Promise.all(plots.map(async (gd, i) => {
+      if (!copies[i]) return;
+      try {
         const w = gd.clientWidth || 600, h = gd.clientHeight || 300;
         const url = await Plotly.toImage(gd, { format: "png", width: w, height: h, scale: 2 });
         const img = toImg(url, w);
         await img.decode().catch(() => {});
         copies[i].replaceWith(img);
-      }));
-    } catch { /* leave the chart out rather than block the PDF */ }
+      } catch (err) {
+        console.warn("PDF export: chart could not be captured", err);
+        const note = document.createElement("p");
+        note.textContent = "Chart could not be captured for the PDF; see it on screen.";
+        note.style.cssText = "font-size:11px;font-style:italic;padding:8px 0";
+        copies[i].replaceWith(note);
+      }
+    }));
   }
 
   // plain 2D canvases outside Plotly

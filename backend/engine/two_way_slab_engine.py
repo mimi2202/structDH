@@ -6,6 +6,11 @@ from enum import Enum
 from typing import Dict, List, Optional, Tuple
 import math
 
+try:
+    from engine.load_combination import uls_combination
+except ImportError:
+    from load_combination import uls_combination
+
 
 class DesignCode(Enum):
     EUROCODE_2 = "EC2"
@@ -54,7 +59,7 @@ CONCRETE_GRADES = {
     "C60/75": 60, "C70/85": 70, "C80/95": 80, "C90/105": 90,
 }
 
-STEEL_GRADES = {"B500": 500.0, "B460": 460.0}
+STEEL_GRADES = {"B500": 500.0, "B460": 460.0, "B410": 410.0}
 
 BUILDING_USE_LIVE_LOADS = {
     "residential": 2.0, "hotel": 2.0, "office": 3.0, "school_classroom": 3.0,
@@ -358,6 +363,10 @@ class TwoWaySlabInput:
     candidate_bar_diameters_mm: Optional[List[int]] = None
     candidate_spacing_mm: Optional[List[int]] = None
     two_way_moment_method: Optional[TwoWayMomentMethod] = None
+    wind_load_kN_m2: float = 0.0       # downward wind pressure on the slab
+    leading_action: str = "auto"       # auto | imposed | wind (EN 1990 6.10)
+    psi0_imposed: float = 0.7
+    psi0_wind: float = 0.6
 
 
 @dataclass
@@ -405,7 +414,13 @@ class TwoWaySlabResult:
     As_target_x: float = 0.0
     As_target_y: float = 0.0
     main_x: Optional[BarArrangement] = None
-    main_y: Optional[BarArrangement] = None
+    main_y: Optional[BarArrangement] = None          # bottom (midspan) steel, y
+    top_x: Optional[BarArrangement] = None           # top steel over the continuous long edges (M_x,neg); None if none
+    top_y: Optional[BarArrangement] = None           # top steel over the continuous short edges (M_y,neg)
+    As_target_x_neg: float = 0.0
+    As_target_y_neg: float = 0.0
+    max_spacing_mm: int = 0
+    combo: Dict = field(default_factory=dict)
     dist_x: Optional[BarArrangement] = None
     dist_y: Optional[BarArrangement] = None
     dist_target_x: float = 0.0
@@ -612,7 +627,6 @@ class TwoWaySlabDesigner:
 
         method = self.input.two_way_moment_method or self.auto_method()
         main_bar_guess = self.input.main_bar_diameter_mm or preset.main_bar_dia_mm
-        preset_spacing = preset.main_bar_spacing_mm
 
         res.thickness_mm = self.input.thickness_mm if self.input.thickness_mm is not None else preset.thickness_mm
 
@@ -631,7 +645,10 @@ class TwoWaySlabDesigner:
             res.Gk_total = res.gk_self_kN_m2 + res.gk_finish_kN_m2 + res.gk_partition_kN_m2 + res.gk_services_kN_m2
             res.Qk_total = res.qk_imposed_kN_m2
 
-        res.wEd_area_kN_m2 = self.material.gamma_G * res.Gk_total + self.material.gamma_Q * res.Qk_total
+        # EN 1990 6.10, imposed or wind leading (no wind -> 1.35 Gk + 1.5 Qk)
+        res.combo = uls_combination(res.Gk_total, res.Qk_total, self.input.wind_load_kN_m2,
+                                    self.input.leading_action, self.input.psi0_imposed, self.input.psi0_wind)
+        res.wEd_area_kN_m2 = res.combo["w_ed"]
 
         if self.input.support_condition == SupportCondition.SSSS_2W:
             mx, my = self.ssss_plate_series_moments(res.wEd_area_kN_m2, self.input.lx_m, self.input.ly_m)
@@ -651,7 +668,11 @@ class TwoWaySlabDesigner:
             res.MEd_y_pos_kN_m_per_m = res.alpha_y_pos * res.wEd_area_kN_m2 * self.input.lx_m ** 2
 
         candidates_d = self.input.candidate_bar_diameters_mm or self.auto_candidate_bar_diameters()
-        candidates_s = self.input.candidate_spacing_mm or self.auto_candidate_spacing()
+        candidates_d = [main_bar_guess] + [c for c in candidates_d if c != main_bar_guess]
+        # EC2 9.3.1.1(3): principal bars in areas of maximum moment s <= 2h <= 250 mm
+        res.max_spacing_mm = int(min(2 * res.thickness_mm, 250))
+        candidates_s = [s for s in (self.input.candidate_spacing_mm or self.auto_candidate_spacing())
+                        if s <= res.max_spacing_mm] or [100]
 
         # --- iterate: effective depth <-> actually-selected bar diameter ---
         # d_mm depends on the bar diameter, but the bar diameter selected can
@@ -680,14 +701,20 @@ class TwoWaySlabDesigner:
             res.As_req_x_main = max(res.As_req_x_neg, res.As_req_x_pos)
             res.As_req_y_main = max(res.As_req_y_neg, res.As_req_y_pos)
             res.As_min_1, res.As_min_2, res.As_min = self.minimum_steel_parts_mm2_per_m(res.d_mm)
-            res.As_target_x = max(res.As_req_x_main, res.As_min)
-            res.As_target_y = max(res.As_req_y_main, res.As_min)
+            # Each location designed on its own with the chosen bar, at the widest
+            # spacing that carries its moment (was: the occupancy preset spacing,
+            # whatever the demand, and the bottom bars repeated as top steel).
+            res.As_target_x = max(res.As_req_x_pos, res.As_min)
+            res.As_target_y = max(res.As_req_y_pos, res.As_min)
+            res.As_target_x_neg = max(res.As_req_x_neg, res.As_min) if res.MEd_x_neg_kN_m_per_m > 0 else 0.0
+            res.As_target_y_neg = max(res.As_req_y_neg, res.As_min) if res.MEd_y_neg_kN_m_per_m > 0 else 0.0
 
-            auto_main = self.arrangement_from_bar_and_spacing(main_bar_guess, preset_spacing)
-            res.main_x = auto_main if auto_main.As_provided_mm2_per_m >= res.As_target_x else self.choose_bar_arrangement(res.As_target_x, candidates_d, candidates_s)
-            res.main_y = auto_main if auto_main.As_provided_mm2_per_m >= res.As_target_y else self.choose_bar_arrangement(res.As_target_y, candidates_d, candidates_s)
+            res.main_x = self.choose_bar_arrangement(res.As_target_x, candidates_d, candidates_s)
+            res.main_y = self.choose_bar_arrangement(res.As_target_y, candidates_d, candidates_s)
+            res.top_x = self.choose_bar_arrangement(res.As_target_x_neg, candidates_d, candidates_s) if res.As_target_x_neg else None
+            res.top_y = self.choose_bar_arrangement(res.As_target_y_neg, candidates_d, candidates_s) if res.As_target_y_neg else None
 
-            governing_dia = max(res.main_x.bar_dia_mm, res.main_y.bar_dia_mm)
+            governing_dia = max(a.bar_dia_mm for a in (res.main_x, res.main_y, res.top_x, res.top_y) if a)
             if governing_dia == main_bar_guess:
                 break
             main_bar_guess = governing_dia
@@ -700,7 +727,8 @@ class TwoWaySlabDesigner:
 
         res.K_deflection = self.deflection_K_factor()
         res.l_over_d_actual = self.input.lx_m * 1000.0 / res.d_mm
-        res.rho = res.As_req_x_main / (1000.0 * res.d_mm) if res.d_mm else 0.0
+        # EC2 7.4.2: rho = tension steel required at mid-span (bottom, short span)
+        res.rho = res.As_req_x_pos / (1000.0 * res.d_mm) if res.d_mm else 0.0
         res.rho_0 = 1e-3 * math.sqrt(self.material.fck)
         safe_rho = res.rho if res.rho > 0 else 1e-9
         # EC2 Eq. 7.16a (rho <= rho0) and 7.16b with rho' = 0 (rho > rho0). Branch A
@@ -722,15 +750,17 @@ class TwoWaySlabDesigner:
             res.deflection_status = "PASS"
             res.deflection_enhanced = False
         else:
-            res.F3 = min(res.main_x.As_provided_mm2_per_m / res.As_req_x_main, 1.5) if res.As_req_x_main else 1.0
+            res.F3 = min(res.main_x.As_provided_mm2_per_m / res.As_req_x_pos, 1.5) if res.As_req_x_pos else 1.0
             res.l_over_d_lim_final = res.l_over_d_lim_basic * res.F3
             res.deflection_status = "PASS" if res.l_over_d_actual <= res.l_over_d_lim_final else "FAIL"
             res.deflection_enhanced = True
 
-        res.bending_status_x = "PASS" if res.main_x.As_provided_mm2_per_m >= res.As_req_x_main else "FAIL"
-        res.bending_status_y = "PASS" if res.main_y.As_provided_mm2_per_m >= res.As_req_y_main else "FAIL"
-        res.min_steel_status_x = "PASS" if res.main_x.As_provided_mm2_per_m >= res.As_min else "FAIL"
-        res.min_steel_status_y = "PASS" if res.main_y.As_provided_mm2_per_m >= res.As_min else "FAIL"
+        def _ok(arr, need):
+            return need <= 0 or (arr is not None and arr.As_provided_mm2_per_m >= need - 1e-9)
+        res.bending_status_x = "PASS" if _ok(res.main_x, res.As_req_x_pos) and _ok(res.top_x, res.As_req_x_neg if res.MEd_x_neg_kN_m_per_m > 0 else 0) else "FAIL"
+        res.bending_status_y = "PASS" if _ok(res.main_y, res.As_req_y_pos) and _ok(res.top_y, res.As_req_y_neg if res.MEd_y_neg_kN_m_per_m > 0 else 0) else "FAIL"
+        res.min_steel_status_x = "PASS" if _ok(res.main_x, res.As_min) and _ok(res.top_x, res.As_target_x_neg) else "FAIL"
+        res.min_steel_status_y = "PASS" if _ok(res.main_y, res.As_min) and _ok(res.top_y, res.As_target_y_neg) else "FAIL"
         res.shear_status = "NOT_CHECKED_MVP"
 
         checks = [res.bending_status_x, res.bending_status_y, res.min_steel_status_x, res.min_steel_status_y, res.deflection_status]

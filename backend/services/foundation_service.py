@@ -972,6 +972,29 @@ def _starters(request, h, mat_phi, n_cols, rows):
             ("pedestal height + lap l0" if request.pedestal_height_mm > 0 else "soil depth + lap l0")}
 
 
+def _links(request, starters, n_cols, rows):
+    """Links to the starters over the column stub (book 9.10 drawing, 10.2
+    mark 03). None when there are no starters or the column is circular."""
+    if not starters or getattr(request, "column_shape", "rectangular") == "circular":
+        return None
+    ped = request.pedestal_height_mm > 0
+    cx = request.pedestal_x_mm if ped else request.column_x_mm
+    cy = request.pedestal_y_mm if ped else request.column_y_mm
+    cc = request.column_cover_mm
+    a, b = cx - 2 * cc, cy - 2 * cc
+    if min(a, b) <= 0:
+        return None
+    stub = max(starters["projection_mm"] - starters["lap_mm"], 0)
+    s = fd.link_spacing(starters["phi_mm"], min(cx, cy))
+    n = max(int(stub // s) + 1, 2)      # at least 2 to hold the starter cage
+    mark = f"{len(rows) + 1:02d}"
+    row = fd.link_row(mark, request.link_dia_mm, n, n_cols, request.n_members, a, b, s)
+    rows.append(row)
+    return {"phi_mm": request.link_dia_mm, "per_column": n, "columns": n_cols, "spacing_mm": s,
+            "a_mm": round(a), "b_mm": round(b), "stub_mm": round(stub), "column_cover_mm": cc,
+            "mark": mark, "callout": row["callout"]}
+
+
 def _pad_detailing(request: PadFoundationRequest, res) -> dict:
     d = request
     phi, c, h = d.bar_dia_mm, d.cover_mm, d.footing_depth_mm
@@ -994,8 +1017,25 @@ def _pad_detailing(request: PadFoundationRequest, res) -> dict:
                    anch[1]["leg_mm"], d.n_members, "bottom, along B (second layer)"),
     ]
     rows, callouts = _merge_identical_mats(mats)
+    # the two bottom layers as drawn (the schedule may merge them into one mark)
+    layers = [{"key": k, "mark": callouts[i].split("-")[2], "callout": callouts[i], "n_bars": m["n_bars"],
+               "spacing_mm": m["spacing_mm"], "phi_mm": phi, "leg_mm": m["dims_mm"]["A"], "straight_mm": m["dims_mm"]["B"]}
+              for i, (k, m) in enumerate(zip(("bottom_L", "bottom_B"), mats))]
     starters = _starters(d, h, phi, 1, rows)
+    if starters:
+        starters["mark"] = rows[-1]["mark"]
+    links = _links(d, starters, 1, rows)
+    ped = d.pedestal_height_mm > 0
+    drawing = {"L_mm": d.footing_length_mm, "B_mm": d.footing_width_mm, "h_mm": h, "cover_mm": c,
+               "soil_above_mm": d.soil_depth_above_mm,
+               "pedestal": {"h_mm": d.pedestal_height_mm, "x_mm": d.pedestal_x_mm, "y_mm": d.pedestal_y_mm} if ped else None,
+               "columns": [{"x_mm": d.footing_length_mm / 2 + d.column_offset_x_mm,
+                            "y_mm": d.footing_width_mm / 2 + d.column_offset_y_mm,
+                            "cx_mm": d.column_x_mm,
+                            "cy_mm": d.column_x_mm if d.column_shape == "circular" else d.column_y_mm,
+                            "shape": d.column_shape}]}
     return {"element": "pad", "anchorage": anch, "callouts": callouts, "starters": starters,
+            "links": links, "layers": layers, "drawing": drawing,
             "schedule": rows, "summary": fd.summarise(rows),
             "status": "OK" if all(a["status"] == "OK" for a in anch) else "NOT OK"}
 
@@ -1031,8 +1071,20 @@ def _combined_detailing(request: CombinedFootingRequest, res) -> dict:
                    "top, transverse (distribution), legs down"),
     ]
     callouts = [r["callout"] for r in rows]
+    layers = [{"key": k, "mark": m["mark"], "callout": m["callout"], "n_bars": m["n_bars"],
+               "spacing_mm": m["spacing_mm"], "phi_mm": phi, "leg_mm": m["dims_mm"]["A"], "straight_mm": m["dims_mm"]["B"]}
+              for k, m in zip(("bottom_L", "top_L", "bottom_B", "top_B"), rows)]
     starters = _starters(d, h, phi, 2, rows)
+    if starters:
+        starters["mark"] = rows[-1]["mark"]
+    links = _links(d, starters, 2, rows)
+    ped = d.pedestal_height_mm > 0
+    drawing = {"L_mm": L, "B_mm": B, "h_mm": h, "cover_mm": c, "soil_above_mm": d.soil_depth_above_mm,
+               "pedestal": {"h_mm": d.pedestal_height_mm, "x_mm": d.pedestal_x_mm, "y_mm": d.pedestal_y_mm} if ped else None,
+               "columns": [{"x_mm": x * 1000, "y_mm": B / 2, "cx_mm": d.column_x_mm, "cy_mm": d.column_y_mm,
+                            "shape": "rectangular"} for x in (res.x1_m, res.x2_m)]}
     return {"element": "combined", "anchorage": anch, "callouts": callouts, "starters": starters,
+            "links": links, "layers": layers, "drawing": drawing,
             "schedule": rows, "summary": fd.summarise(rows),
             "status": "OK" if all(a["status"] == "OK" for a in anch) else "NOT OK"}
 
@@ -1072,6 +1124,15 @@ def _detailing_section(num: str, request, det: dict) -> dict:
                       f"lap l0 = 1.5 l_b,rqd >= max(15 phi, 200) = {st['lap_mm']} mm (EC2 8.7.3 Eq. 8.10, 8.11, alpha6 = 1.5); projection above "
                       f"footing = {st['projection_mm']} mm ({st['projection_from']}); foot 300 mm on the bottom mat",
                       "scheduled"))
+    lk = det.get("links")
+    if lk:
+        rows.append(R("Links to starters (EC2 9.5.3)", f"column stub = projection - lap = {lk['stub_mm']} mm; spacing = min(200, 20 phi, "
+                      f"least column dimension, 400) = {lk['spacing_mm']:.0f} mm; number = max(floor(stub/s) + 1, 2) = {lk['per_column']} "
+                      f"per column x {lk['columns']}; sides = column - 2 x {lk['column_cover_mm']:.0f} cover = {lk['a_mm']} x {lk['b_mm']} mm; "
+                      "cut length = 2(A + B) + 2 x 50 hooks", lk["callout"]))
+    elif st:
+        rows.append(R("Links to starters", "circular column, or the column cover leaves no link: links are left to the column design",
+                      "not scheduled"))
     rows.append(R("Bar callouts", "number-size-mark-spacing", ", ".join(det["callouts"])))
     rows.append(R("Bar schedule", "cut length = sum of the shape dimensions (BS 8666 bend deduction not applied: lengths slightly long); "
                   f"{request.n_members} identical footing(s)", "see schedule"))

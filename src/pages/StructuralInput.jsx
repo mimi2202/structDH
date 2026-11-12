@@ -3,13 +3,18 @@ import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   FiGrid, FiMinus, FiColumns, FiBox, FiSquare, FiActivity, FiLayers,
-  FiSettings, FiHelpCircle, FiHome, FiChevronRight, FiChevronDown,
+  FiSettings, FiHelpCircle, FiHome, FiChevronDown,
   FiFilePlus, FiFolder, FiSave, FiMoreVertical, FiInfo, FiRefreshCw,
   FiArrowRight, FiCheck, FiLoader, FiAlertTriangle,
 } from "react-icons/fi";
 import { slabAPI } from "../services/api";
 import DesignProgressBar from "../components/ui/DesignProgressBar";
+import ResetButton from "../components/ui/ResetButton";
+import { applySettings } from "../utils/appSettings";
+import { Crumbs } from "../components/results/DesignTopBar";
 
+// which form fields the Settings page pre-fills (utils/appSettings.js)
+const SETTINGS_MAP = { keys: "camel", concrete: "concreteGrade", steel: "steelGrade" };
 const INPUT_DRAFT_KEY = "structuralInputDraft";
 
 /* ================================================================== */
@@ -54,7 +59,18 @@ const CONCRETE_GRADES = [
 const STEEL_GRADES = [
   { value: "B500", label: "B500B (fyk = 500 MPa)" },
   { value: "B460", label: "B460B (fyk = 460 MPa)" },
+  { value: "B410", label: "B410 (fyk = 410 MPa)" },
 ];
+
+// EN 1990 6.10: one variable action leads, the other accompanies with psi_0
+// (Table A1.1: imposed A-D 0.7, wind 0.6). Same rule as backend engine/load_combination.py.
+const LEADING_ACTIONS = [
+  { value: "auto", label: "Automatic (larger combination)" },
+  { value: "imposed", label: "Imposed load leading" },
+  { value: "wind", label: "Wind leading" },
+];
+const PSI0_IMPOSED = 0.7;
+const PSI0_WIND = 0.6;
 // BS8110 and ACI318 are blocked server-side (models/schemas.py); the BS-only
 // grade sets and the multi-code dropdown that used to drive them are gone.
 // EC2 is the only code this page can produce, so it's shown as a fixed
@@ -120,6 +136,8 @@ const DEFAULTS = {
   liveLoad: "3.0",
   additionalDeadLoad: "0",
   additionalLiveLoad: "0",
+  windLoad: "0",          // kN/m2, downward wind pressure on the slab (roof slab)
+  leadingAction: "auto",
   designCode: "EC2",
   analysisMethod: "limit_state",
   buildingUse: "office",
@@ -139,18 +157,17 @@ const StructuralInput = () => {
   const [formData, setFormData] = useState(() => {
     try {
       const saved = sessionStorage.getItem(INPUT_DRAFT_KEY);
-      if (!saved) return DEFAULTS;
+      if (!saved) return applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true });
       const parsed = JSON.parse(saved);
       // BS8110/ACI318 are blocked server-side. A draft saved before that
       // existed could still carry one, which would otherwise 422 silently
       // until Reset is pressed -- normalize it here instead.
       if (parsed.designCode && parsed.designCode !== "EC2") parsed.designCode = "EC2";
-      return { ...DEFAULTS, ...parsed };
+      return applySettings({ ...DEFAULTS, ...parsed }, SETTINGS_MAP);
     } catch {
-      return DEFAULTS;
+      return applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true });
     }
   });
-  const [isValidating, setIsValidating] = useState(false);
   const [isOptimising, setIsOptimising] = useState(false);
   const [error, setError] = useState(null);
 
@@ -176,39 +193,24 @@ const StructuralInput = () => {
   const ll = parseFloat(formData.liveLoad) || 0;
   const adl = parseFloat(formData.additionalDeadLoad) || 0;
   const all_ = parseFloat(formData.additionalLiveLoad) || 0;
-  const totalLoad = ff + ll + adl + all_;   // self-weight added on the backend
+  const wk = Math.max(parseFloat(formData.windLoad) || 0, 0);
+  const totalLoad = ff + ll + adl + all_ + wk;   // self-weight added on the backend
+  // ULS preview, same as the backend: Gk includes self-weight
+  const gk = (parseFloat(formData.unitWeightConcrete) || 25) * (parseFloat(formData.thickness) || 0) / 1000 + ff + adl;
+  const qk = ll + all_;
+  const wImp = 1.35 * gk + 1.5 * qk + 1.5 * PSI0_WIND * wk;
+  const wWind = 1.35 * gk + 1.5 * wk + 1.5 * PSI0_IMPOSED * qk;
+  const lead = wk <= 0 ? "imposed" : formData.leadingAction === "imposed" || formData.leadingAction === "wind"
+    ? formData.leadingAction : (wWind > wImp ? "wind" : "imposed");
 
   const handleReset = () => {
-    if (window.confirm("Reset all fields to defaults?")) {
-      setFormData(DEFAULTS);
-      setError(null);
-      try {
-        sessionStorage.removeItem(INPUT_DRAFT_KEY);
-      } catch {
-        // ignore
-      }
-    }
-  };
-
-  const handleValidate = () => {
-    setIsValidating(true);
+    setFormData(applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true }));
     setError(null);
-    setTimeout(() => {
-      setIsValidating(false);
-      const lx = parseFloat(formData.spanLx); // mm
-      const ly = parseFloat(formData.spanLy); // mm
-      const t = parseFloat(formData.thickness);
-      const cover = parseFloat(formData.clearCover);
-      if (!lx || lx <= 0 || (twoWay && (!ly || ly <= 0))) return setError("Span values must be greater than zero.");
-      if (twoWay && lx > ly) return setError("Lx (short span) must be less than or equal to Ly (long span).");
-      if (t < 100) return setError("Slab thickness must be at least 100 mm.");
-      if (cover < 15) return setError("Clear cover must be at least 15 mm.");
-      const barGuess = parseFloat(formData.mainBarDia) || 12;
-      const d = t - (cover + 5) - barGuess / 2;   // matches backend: cover + fixed 5mm tolerance, minus half the bar
-      const ratio = lx / d;
-      if (ratio > 40) return setError(`Span/depth ratio (${ratio.toFixed(1)}) exceeds 40. Increase thickness.`);
-      window.alert("Validation passed. All inputs are within acceptable ranges.");
-    }, 400);
+    try {
+      sessionStorage.removeItem(INPUT_DRAFT_KEY);
+    } catch {
+      // ignore
+    }
   };
 
   const handleOptimise = async () => {
@@ -338,12 +340,32 @@ const StructuralInput = () => {
                   <Field label="Extra Dead Load" unit="kN/m²" value={formData.additionalDeadLoad} onChange={(v) => set({ additionalDeadLoad: v })} step="0.5" />
                   <Field label="Extra Live Load" unit="kN/m²" value={formData.additionalLiveLoad} onChange={(v) => set({ additionalLiveLoad: v })} step="0.5" />
                   <div>
-                    <label className={LABEL}>Total Load (DL + LL)</label>
+                    <Field label="Wind Load on Slab (W)" unit="kN/m²" value={formData.windLoad} onChange={(v) => set({ windLoad: v })} step="0.1" />
+                    <p className={`mt-1 text-[10px] ${SUB}`}>Downward wind pressure, EN 1991-1-4 (e.g. roof slab). 0 = no wind. Uplift is not checked.</p>
+                  </div>
+                  <div>
+                    <label className={LABEL}>Leading Variable Action</label>
+                    <Dropdown value={formData.leadingAction} onChange={(e) => set({ leadingAction: e.target.value })} options={LEADING_ACTIONS} />
+                    <p className={`mt-1 text-[10px] ${SUB}`}>The other action is accompanying, &times; &psi;<sub>0</sub> (imposed {PSI0_IMPOSED}, wind {PSI0_WIND}).</p>
+                  </div>
+                  <div>
+                    <label className={LABEL}>Total Load (DL + LL + W)</label>
                     <div className="flex items-center justify-between rounded-lg border border-[#e2e8f0] dark:border-[#475569] bg-[#f1f5f9] dark:bg-[#334155] px-3 py-2">
                       <span className="font-mono text-sm font-bold text-[#0A2F44] dark:text-[#66a4c2]">{totalLoad.toFixed(2)}</span>
                       <span className={`text-xs ${SUB}`}>kN/m²</span>
                     </div>
                   </div>
+                </div>
+                <div className="mt-4 rounded-lg border border-[#e2e8f0] dark:border-[#334155] p-3 font-mono text-[11px]">
+                  <p className={`mb-1 font-sans text-xs font-semibold ${MAIN}`}>ULS combination, EN 1990 Eq. 6.10 (G<sub>k</sub> = {gk.toFixed(2)} incl. self-weight, Q<sub>k</sub> = {qk.toFixed(2)}, W<sub>k</sub> = {wk.toFixed(2)} kN/m²)</p>
+                  <p className={lead === "imposed" ? "font-bold text-[#0A2F44] dark:text-[#66a4c2]" : SUB}>
+                    Imposed leading: 1.35G<sub>k</sub> + 1.5Q<sub>k</sub> + 1.5&times;{PSI0_WIND}W<sub>k</sub> = {wImp.toFixed(2)} kN/m²{lead === "imposed" ? "  ← used" : ""}
+                  </p>
+                  {wk > 0 && (
+                    <p className={lead === "wind" ? "font-bold text-[#0A2F44] dark:text-[#66a4c2]" : SUB}>
+                      Wind leading: 1.35G<sub>k</sub> + 1.5W<sub>k</sub> + 1.5&times;{PSI0_IMPOSED}Q<sub>k</sub> = {wWind.toFixed(2)} kN/m²{lead === "wind" ? "  ← used" : ""}
+                    </p>
+                  )}
                 </div>
               </Section>
 
@@ -438,7 +460,9 @@ const StructuralInput = () => {
                     <SumRow label="Steel Grade" value={formData.steelGrade} />
                     <SumRow label="Floor Finish / Additional DL" value={`${ff.toFixed(2)} kN/m²`} />
                     <SumRow label="Live Load (LL)" value={`${ll.toFixed(2)} kN/m²`} />
-                    <SumRow label="Total Load (DL + LL)" value={`${totalLoad.toFixed(2)} kN/m²`} strong />
+                    <SumRow label="Wind Load (W)" value={`${wk.toFixed(2)} kN/m²`} />
+                    <SumRow label="Leading Action" value={lead === "wind" ? "Wind" : "Imposed"} />
+                    <SumRow label="Total Load (DL + LL + W)" value={`${totalLoad.toFixed(2)} kN/m²`} strong />
                     <SumRow label="Design Code" value={DESIGN_CODES.find((c) => c.value === formData.designCode)?.label.split(" (")[0] || formData.designCode} />
                     <SumRow label="Analysis Method" value={ANALYSIS_METHODS.find((m) => m.value === formData.analysisMethod)?.label || formData.analysisMethod} />
                   </div>
@@ -451,12 +475,6 @@ const StructuralInput = () => {
         {/* footer actions */}
         <div className="border-t border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1f2937] px-6 py-4">
           <div className="flex items-center justify-end gap-3">
-            <button onClick={handleReset} className={`flex items-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-4 py-2 text-sm ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#334155] transition-colors`}>
-              <FiRefreshCw size={15} /> Reset
-            </button>
-            <button onClick={handleValidate} disabled={isValidating} className={`flex items-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-4 py-2 text-sm ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#334155] transition-colors disabled:opacity-50`}>
-              {isValidating ? <FiLoader className="animate-spin" size={15} /> : <FiSave size={15} />} Save
-            </button>
             <button onClick={handleOptimise} disabled={isOptimising} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-5 py-2 text-sm font-medium text-white shadow-md hover:bg-[#082636] transition-colors disabled:opacity-50">
               {isOptimising ? <FiLoader className="animate-spin" size={15} /> : null}
               {isOptimising ? "Optimising…" : "Proceed to Design"} <FiArrowRight size={15} />
@@ -510,28 +528,14 @@ function TopBar({ twoWay, onReset }) {
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#0A2F44] text-white"><FiHome size={15} /></div>
           <span className={`text-sm font-bold ${MAIN}`}>Struct Design Hub</span>
         </div>
-        <nav className={`hidden md:flex items-center gap-1.5 text-[13px] ${SUB}`}>
-          <span>Slab Design</span><FiChevronRight size={13} />
-          <span>{twoWay ? "Two-Way Slab" : "One-Way Slab"}</span><FiChevronRight size={13} />
-          <span className={`font-medium ${MAIN}`}>Input</span>
-        </nav>
+        <Crumbs items={[
+          { label: "Slab Design", to: "/structural-input" },
+          { label: twoWay ? "Two-Way Slab" : "One-Way Slab", to: "/structural-input" },
+          { label: "Input" },
+        ]} />
       </div>
-      <div className="flex items-center gap-1">
-        <TopBtn icon={FiFilePlus} label="New" onClick={onReset} />
-        <TopBtn icon={FiFolder} label="Open" />
-        <TopBtn icon={FiSave} label="Save" />
-        <button className={`ml-1 rounded-md p-1.5 ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#334155]`}><FiMoreVertical size={16} /></button>
-      </div>
+      <ResetButton variant="top" onReset={onReset} what="the slab input" />
     </header>
-  );
-}
-
-function TopBtn({ icon, label, onClick }) {
-  const Icon = icon;
-  return (
-    <button onClick={onClick} className={`hidden sm:flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#334155]`}>
-      <Icon size={15} /> {label}
-    </button>
   );
 }
 

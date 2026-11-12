@@ -1,9 +1,12 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { exportElementToPdf } from "../utils/exportPdf";
+import FullDocument from "../components/results/FullDocument";
+import { DIAGRAM } from "../components/results/diagramTheme";
 import { buildCoverHtml } from "../utils/reportCover";
 import { useDesignMeta } from "../contexts/DesignMetaContext";
 import DetailedReport from "../components/DetailedReport";
+import DesignTopBar from "../components/results/DesignTopBar";
 import {
   FiArrowLeft, FiAlertTriangle, FiInfo, FiCheckCircle, FiXCircle, FiFileText,
   FiDownload, FiLayers, FiGrid, FiActivity, FiBox, FiZap, FiBarChart2,
@@ -13,14 +16,15 @@ const CARD = "bg-white dark:bg-[#1f2937] rounded-xl border border-[#e2e8f0] dark
 const MAIN = "text-[#0F172A] dark:text-white";
 const SUB = "text-[#64748b] dark:text-[#94a3b8]";
 const ACCENT = "text-[#0A2F44] dark:text-[#66a4c2]";
-const HOG = "#ef4444";   // negative / hogging
-const SAG = "#22c55e";   // positive / sagging
+const HOG = DIAGRAM.hogging;   // negative / hogging (shared colours, components/results/diagramTheme.js)
+const SAG = DIAGRAM.sagging;   // positive / sagging
+const SHR = DIAGRAM.shear;
 
 const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection"];
 
 // what each tab holds, for the cover page of its PDF
 const TAB_NOTES = {
-  "Overview": "geometry, loads, moment and shear diagrams, reinforcement and the status of every check.",
+  "Overview": "the complete design document: summary, flexural, shear and deflection sections in full, and the full calculation report, numbered.",
   "Flexural Design": "the bending design in full: K, lever arm, tension and minimum steel, bars provided (EC2 6.1).",
   "Shear Design": "the shear design in full: resistance without links, links where needed (EC2 6.2).",
   "Deflection": "the span/depth deflection check for every span (EC2 7.4.2).",
@@ -77,65 +81,7 @@ export default function ContinuousBeamResults() {
     { icon: FiGrid, label: "Units", value: "kN, mm" },
   ];
 
-  return (
-    <div ref={sheetRef} className="flex flex-col">
-      {/* title */}
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className={`text-lg font-bold uppercase tracking-wide ${ACCENT}`}>Continuous Beam Output — {summary.design_code}</h1>
-          <p className={`text-sm ${SUB}`}>{summary.beam_id} · Design Code: {summary.design_code}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${pass ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
-            {pass ? <FiCheckCircle /> : <FiXCircle />} {pass ? "SAFE" : "CHECK"}
-          </span>
-          <button onClick={() => setReportOpen(true)} className="flex items-center gap-2 rounded-lg border border-[#0A2F44] dark:border-[#66a4c2] px-3 py-1.5 text-sm font-medium text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#e6f0f5] dark:hover:bg-[#1e3a4a]"><FiFileText size={15} /> Detailed Report</button>
-          <button onClick={() => exportElementToPdf(sheetRef.current, `ContinuousBeam-${summary.beam_id || "report"}-${tab}`, buildCoverHtml({
-            element: "Continuous Beam", member: summary.beam_id, section: tab, sectionNote: TAB_NOTES[tab],
-            description: `${summary.n_spans}-span continuous reinforced concrete beam designed to BS EN 1992-1-1 for bending, shear and deflection.`,
-            facts: [
-              ["Spans", summary.span_lengths.join(" + ") + " mm"],
-              ["Section (b × h)", `${summary.width} × ${summary.depth} mm, d = ${summary.effective_depth} mm`],
-              ["Materials", `${summary.concrete_grade}, ${summary.steel_grade}`],
-              ["Utilisation (bending / shear)", `${capacity.utilization_bending} / ${capacity.utilization_shear}`],
-            ],
-            status: summary.status, report,
-          }))} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#082636]"><FiDownload size={15} /> Download</button>
-        </div>
-      </div>
-
-      {/* meta strip */}
-      <div className={`mb-5 ${CARD} flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3`}>
-        {meta.map((m, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <m.icon className={`${ACCENT}`} size={16} />
-            <div><p className={`text-[10px] uppercase ${SUB}`}>{m.label}</p><p className={`text-xs font-semibold ${MAIN}`}>{m.value}</p></div>
-          </div>
-        ))}
-      </div>
-
-      {/* analysis notes */}
-      {warnings?.length > 0 && (
-        <div className="cb-no-print mb-5 rounded-lg border border-[#e2e8f0] dark:border-[#334155] bg-[#f8fafc] dark:bg-[#0b0f19] p-4">
-          <div className="mb-1 flex items-center gap-2 font-semibold text-[#0A2F44] dark:text-[#66a4c2]"><FiInfo /> Analysis notes</div>
-          <ul className="ml-6 list-disc space-y-1 text-sm text-[#475569] dark:text-[#94a3b8]">{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
-        </div>
-      )}
-
-      {/* TABS -- Overview below is completely untouched from before; these
-          are ADDITIONAL views only, not a replacement or reorganization. */}
-      <div className="cb-no-print mb-5 flex gap-6 overflow-x-auto border-b border-[#e2e8f0] dark:border-[#334155]">
-        {TABS.map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-2.5 text-[12px] font-semibold uppercase tracking-wide transition-colors ${
-              tab === t ? "border-[#0A2F44] dark:border-[#66a4c2] text-[#0A2F44] dark:text-[#66a4c2]"
-                        : `border-transparent ${SUB} hover:text-[#0F172A] dark:hover:text-white`}`}>
-            {t}
-          </button>
-        ))}
-      </div>
-
-      {tab === "Overview" && (
+  const overviewNode = (
       <>
       {/* dashboard grid */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -156,7 +102,7 @@ export default function ContinuousBeamResults() {
         </Card>
         <Card n="5" title="Shear Force Diagram (Design)">
           <SFD spans={spans} supports={supports} />
-          <Legend items={[["+ve", HOG], ["−ve", SAG]]} />
+          <Legend items={[["Shear force", SHR]]} />
         </Card>
         <Card n="6" title="Deflection (Serviceability)">
           <Defl lengths={summary.span_lengths} labels={(data.deflection_detail?.spans || []).map((s) => `L/d ${s.actual_Ld} / ${s.allowable_Ld}`)} />
@@ -221,6 +167,86 @@ export default function ContinuousBeamResults() {
       </div>
 
       </>
+  );
+  return (
+    <div ref={sheetRef} className="flex flex-col">
+      <DesignTopBar element="continuous-beam" className="mb-4"
+        crumbs={[
+          { label: "Beam Design", to: "/beam" },
+          { label: "Continuous Beam", to: "/continuous-beam" },
+          { label: "Results" },
+        ]}
+        onNew={() => navigate("/continuous-beam")}
+        save={{
+          name: `Continuous beam ${summary.beam_id || ""} ${summary.span_lengths.join(" + ")} mm, ${summary.width} × ${summary.depth}`.replace(/\s+/g, " "),
+          status: summary.status,
+          subtitle: [summary.concrete_grade, summary.steel_grade].filter(Boolean).join(" · "),
+        }}
+        onOpened={() => setTab("Overview")}
+        menu={[["Detailed report", () => setReportOpen(true)]]} />
+      {/* title */}
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className={`text-lg font-bold uppercase tracking-wide ${ACCENT}`}>Continuous Beam Output — {summary.design_code}</h1>
+          <p className={`text-sm ${SUB}`}>{summary.beam_id} · Design Code: {summary.design_code}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${pass ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
+            {pass ? <FiCheckCircle /> : <FiXCircle />} {pass ? "SAFE" : "CHECK"}
+          </span>
+          <button onClick={() => setReportOpen(true)} className="flex items-center gap-2 rounded-lg border border-[#0A2F44] dark:border-[#66a4c2] px-3 py-1.5 text-sm font-medium text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#e6f0f5] dark:hover:bg-[#1e3a4a]"><FiFileText size={15} /> Detailed Report</button>
+          <button onClick={() => exportElementToPdf(sheetRef.current, `ContinuousBeam-${summary.beam_id || "report"}-${tab}`, buildCoverHtml({
+            element: "Continuous Beam", member: summary.beam_id, section: tab, sectionNote: TAB_NOTES[tab],
+            description: `${summary.n_spans}-span continuous reinforced concrete beam designed to BS EN 1992-1-1 for bending, shear and deflection.`,
+            facts: [
+              ["Spans", summary.span_lengths.join(" + ") + " mm"],
+              ["Section (b × h)", `${summary.width} × ${summary.depth} mm, d = ${summary.effective_depth} mm`],
+              ["Materials", `${summary.concrete_grade}, ${summary.steel_grade}`],
+              ["Utilisation (bending / shear)", `${capacity.utilization_bending} / ${capacity.utilization_shear}`],
+            ],
+            status: summary.status, report,
+          }))} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#082636]"><FiDownload size={15} /> Download</button>
+        </div>
+      </div>
+
+      {/* meta strip */}
+      <div className={`mb-5 ${CARD} flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3`}>
+        {meta.map((m, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <m.icon className={`${ACCENT}`} size={16} />
+            <div><p className={`text-[10px] uppercase ${SUB}`}>{m.label}</p><p className={`text-xs font-semibold ${MAIN}`}>{m.value}</p></div>
+          </div>
+        ))}
+      </div>
+
+      {/* analysis notes */}
+      {warnings?.length > 0 && (
+        <div className="cb-no-print mb-5 rounded-lg border border-[#e2e8f0] dark:border-[#334155] bg-[#f8fafc] dark:bg-[#0b0f19] p-4">
+          <div className="mb-1 flex items-center gap-2 font-semibold text-[#0A2F44] dark:text-[#66a4c2]"><FiInfo /> Analysis notes</div>
+          <ul className="ml-6 list-disc space-y-1 text-sm text-[#475569] dark:text-[#94a3b8]">{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+        </div>
+      )}
+
+      {/* TABS -- Overview below is completely untouched from before; these
+          are ADDITIONAL views only, not a replacement or reorganization. */}
+      <div className="cb-no-print mb-5 flex gap-6 overflow-x-auto border-b border-[#e2e8f0] dark:border-[#334155]">
+        {TABS.map((t) => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-2.5 text-[12px] font-semibold uppercase tracking-wide transition-colors ${
+              tab === t ? "border-[#0A2F44] dark:border-[#66a4c2] text-[#0A2F44] dark:text-[#66a4c2]"
+                        : `border-transparent ${SUB} hover:text-[#0F172A] dark:hover:text-white`}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {tab === "Overview" && (
+        <FullDocument report={report} parts={[
+          { title: "Design Summary", node: overviewNode },
+          { title: "Flexural Design", node: <FlexuralTab data={data} /> },
+          { title: "Shear Design", node: <ShearTab data={data} /> },
+          { title: "Deflection", node: <DeflectionTab data={data} /> },
+        ]} />
       )}
 
       {tab === "Flexural Design" && <FlexuralTab data={data} />}
@@ -262,7 +288,7 @@ function ReportModal({ report, summary, onClose }) {
 function Card({ n, title, children, span2 }) {
   return (
     <section className={`${CARD} ${span2 ? "lg:col-span-2" : ""}`}>
-      <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">{n}. {title}</h3></header>
+      <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="doc-h text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]"><span className="doc-n">{n}. </span>{title}</h3></header>
       <div className="p-4">{children}</div>
     </section>
   );
@@ -343,12 +369,12 @@ function BMD({ spans, supports }) {
       <line x1={nodes[0]} y1={mid} x2={nodes[nodes.length - 1]} y2={mid} stroke="#94a3b8" strokeWidth="1" />
       {spans.map((s, i) => {
         const xa = nodes[i], xb = nodes[i + 1], xc = (xa + xb) / 2, hh = (s.m_sagging / peak) * amp;
-        return <g key={i}><path d={`M${xa},${mid} Q${xc},${mid + hh * 2} ${xb},${mid} Z`} fill={SAG} fillOpacity="0.2" stroke={SAG} strokeWidth="1.3" /><text x={xc} y={mid + 28} fontSize="8" fill={SAG} textAnchor="middle">+{s.m_sagging}</text></g>;
+        return <g key={i}><path d={`M${xa},${mid} Q${xc},${mid + hh * 2} ${xb},${mid} Z`} fill={SAG} fillOpacity={DIAGRAM.fillOpacity} stroke={SAG} strokeWidth="1.3" /><text x={xc} y={mid + 28} fontSize="8" fill={SAG} textAnchor="middle">+{s.m_sagging}</text></g>;
       })}
       {supports.map((s, i) => {
         if (s.m_hogging <= 0) return null;
         const x = nodes[s.index], hh = (s.m_hogging / peak) * amp, w = 22;
-        return <g key={`h${i}`}><path d={`M${x - w},${mid} Q${x},${mid - hh * 2} ${x + w},${mid} Z`} fill={HOG} fillOpacity="0.2" stroke={HOG} strokeWidth="1.3" /><text x={x} y={mid - 14} fontSize="8" fill={HOG} textAnchor="middle">−{s.m_hogging}</text></g>;
+        return <g key={`h${i}`}><path d={`M${x - w},${mid} Q${x},${mid - hh * 2} ${x + w},${mid} Z`} fill={HOG} fillOpacity={DIAGRAM.fillOpacity} stroke={HOG} strokeWidth="1.3" /><text x={x} y={mid - 14} fontSize="8" fill={HOG} textAnchor="middle">−{s.m_hogging}</text></g>;
       })}
       {nodes.map((x, i) => <line key={`n${i}`} x1={x} y1={mid - 3} x2={x} y2={mid + 3} stroke="#64748b" strokeWidth="1.5" />)}
     </svg>
@@ -365,9 +391,9 @@ function SFD({ spans, supports }) {
         const xa = nodes[i], xb = nodes[i + 1];
         const vL = supports[i]?.shear || 0, vR = supports[i + 1]?.shear || 0;
         const hL = (vL / peak) * amp, hR = (vR / peak) * amp;
-        return <path key={i} d={`M${xa},${mid} L${xa},${mid - hL} L${xb},${mid + hR} L${xb},${mid} Z`} fill={SAG} fillOpacity="0.15" stroke={SAG} strokeWidth="1.2" />;
+        return <path key={i} d={`M${xa},${mid} L${xa},${mid - hL} L${xb},${mid + hR} L${xb},${mid} Z`} fill={SHR} fillOpacity={DIAGRAM.fillOpacity} stroke={SHR} strokeWidth="1.2" />;
       })}
-      {supports.map((s, i) => <text key={i} x={nodes[i]} y={mid - amp - 4} fontSize="7.5" fill={HOG} textAnchor="middle">{s.shear}</text>)}
+      {supports.map((s, i) => <text key={i} x={nodes[i]} y={mid - amp - 4} fontSize="7.5" fill={SHR} textAnchor="middle">{s.shear}</text>)}
       {nodes.map((x, i) => <line key={`n${i}`} x1={x} y1={mid - 3} x2={x} y2={mid + 3} stroke="#64748b" strokeWidth="1.5" />)}
     </svg>
   );
@@ -378,7 +404,7 @@ function Defl({ lengths, labels = [] }) {
   return (
     <svg viewBox="0 0 360 70" className="w-full text-[#0A2F44] dark:text-[#66a4c2]">
       <line x1={nodes[0]} y1={mid} x2={nodes[nodes.length - 1]} y2={mid} strokeDasharray="3 3" stroke="#94a3b8" strokeWidth="1" />
-      {nodes.slice(0, -1).map((x, i) => { const xb = nodes[i + 1], xc = (x + xb) / 2; return <path key={i} d={`M${x},${mid} Q${xc},${mid + 26} ${xb},${mid}`} fill="none" stroke="currentColor" strokeWidth="1.4" />; })}
+      {nodes.slice(0, -1).map((x, i) => { const xb = nodes[i + 1], xc = (x + xb) / 2; return <path key={i} d={`M${x},${mid} Q${xc},${mid + 26} ${xb},${mid}`} fill="none" stroke={DIAGRAM.deflection} strokeWidth="1.6" />; })}
       {nodes.map((x, i) => <circle key={i} cx={x} cy={mid} r="2" fill="currentColor" />)}
       {nodes.slice(0, -1).map((x, i) => labels[i] ? <text key={`t${i}`} x={(x + nodes[i + 1]) / 2} y={mid + 40} fontSize="7.5" fill="currentColor" textAnchor="middle">{labels[i]}</text> : null)}
     </svg>
@@ -431,7 +457,7 @@ function FlexuralTab({ data }) {
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
       <section className={`${CARD} lg:col-span-2`}>
         <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5">
-          <h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Flexural Design &mdash; Full Derivation (EC2 &sect;6.1)</h3>
+          <h3 className="doc-h text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Flexural Design &mdash; Full Derivation (EC2 &sect;6.1)</h3>
         </header>
         <div className="overflow-x-auto p-4">
           <table className="w-full text-left text-[12px]">
@@ -474,7 +500,7 @@ function FlexuralTab({ data }) {
         </div>
       </section>
       <section className={CARD}>
-        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Bending Moment Diagram</h3></header>
+        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="doc-h text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Bending Moment Diagram</h3></header>
         <div className="p-4">
           <BMD spans={spans} supports={supports} />
           <Legend items={[["Hogging (\u2212)", HOG], ["Sagging (+)", SAG]]} />
@@ -489,7 +515,7 @@ function ShearTab({ data }) {
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
       <section className={CARD}>
-        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Shear Design &mdash; Full Derivation (EC2 &sect;6.2.2)</h3></header>
+        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="doc-h text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Shear Design &mdash; Full Derivation (EC2 &sect;6.2.2)</h3></header>
         <div className="p-4">
           {shd ? (
             <div className="space-y-1.5">
@@ -513,10 +539,10 @@ function ShearTab({ data }) {
         </div>
       </section>
       <section className={CARD}>
-        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Shear Force Diagram</h3></header>
+        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="doc-h text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Shear Force Diagram</h3></header>
         <div className="p-4">
           <SFD spans={spans} supports={supports} />
-          <Legend items={[["+ve", HOG], ["\u2212ve", SAG]]} />
+          <Legend items={[["Shear force", SHR]]} />
         </div>
       </section>
     </div>
@@ -528,7 +554,7 @@ function DeflectionTab({ data }) {
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
       <section className={CARD}>
-        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Deflection Design &mdash; Full Derivation (EC2 &sect;7.4.2, two-stage)</h3></header>
+        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="doc-h text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Deflection Design &mdash; Full Derivation (EC2 &sect;7.4.2, two-stage)</h3></header>
         <div className="p-4">
           {dd ? (
             <div className="space-y-1.5">
@@ -557,7 +583,7 @@ function DeflectionTab({ data }) {
         </div>
       </section>
       <section className={CARD}>
-        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Deflected Shape</h3></header>
+        <header className="border-b border-[#e2e8f0] dark:border-[#334155] px-4 py-2.5"><h3 className="doc-h text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Deflected Shape</h3></header>
         <div className="p-4">
           <Defl lengths={summary.span_lengths} value={sls.deflection_actual} />
         </div>

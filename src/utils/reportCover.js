@@ -9,6 +9,8 @@
 // and columns; {ref, calc, out} for foundations) -- so rows are normalised
 // first. Nothing is invented: a blank field prints "Not entered".
 
+import { getSettings } from "./appSettings";
+
 const PRODUCT = "SDH (Structural Design Hub)";
 
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => (
@@ -51,6 +53,7 @@ function independentCheck(v) {
  */
 export function buildCoverHtml(opts) {
   const rows = reportRows(opts.report);
+  const company = getSettings().company.trim();     // Settings page: printed at the top of the cover
   const calcId = field(rows, "Calculation ID");
   const generated = field(rows, "Generated")
     || new Date().toLocaleString(undefined, { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -70,7 +73,7 @@ export function buildCoverHtml(opts) {
 
   return `
 <div class="pdf-cover">
-  <div class="pc-top">${esc(PRODUCT)} &middot; Structural Engineering Calculation</div>
+  <div class="pc-top">${company ? `${esc(company)} &middot; ` : ""}${esc(PRODUCT)} &middot; Structural Engineering Calculation</div>
   <h1 class="pc-title">${esc(opts.element)} Design</h1>
   <div class="pc-sub">${esc([opts.member, opts.project, opts.location].filter(Boolean).join(" · "))}</div>
 

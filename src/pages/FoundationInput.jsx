@@ -5,6 +5,8 @@ import {
   FiHome, FiRefreshCw, FiLoader, FiInfo, FiAlertTriangle, FiCheckCircle,
 } from "react-icons/fi";
 import DesignProgressBar from "../components/ui/DesignProgressBar";
+import ResetButton from "../components/ui/ResetButton";
+import { applySettings } from "../utils/appSettings";
 import Dropdown from "../components/Dropdown";
 import { foundationAPI } from "../services/api";
 
@@ -53,6 +55,7 @@ const DEFAULTS = {
   cover_mm: "50", bar_dia_mm: "16", autoBars: false,
   // detailing / bar schedule (Structville 9.10, 10.2)
   n_members: "1", starter_bar_count: "4", starter_bar_dia_mm: "16", starter_projection_mm: "",
+  link_dia_mm: "8", column_cover_mm: "35",
   // loads — service + ultimate (engine uses ultimate)
   service_vertical_kN: "500", service_mx: "10", service_my: "5",
   // ULS/SLS ratio used when the service row is blank (Structville: 1.36 for residential)
@@ -82,6 +85,8 @@ const detailingFields = (f) => ({
   starter_bar_count: Math.max(parseInt(f.starter_bar_count, 10) || 0, 0),
   starter_bar_dia_mm: parseFloat(f.starter_bar_dia_mm) || 16,
   starter_projection_mm: parseFloat(f.starter_projection_mm) > 0 ? parseFloat(f.starter_projection_mm) : null,
+  link_dia_mm: parseFloat(f.link_dia_mm) || 8,
+  column_cover_mm: parseFloat(f.column_cover_mm) > 0 ? parseFloat(f.column_cover_mm) : 35,
 });
 
 // Combined footing: the pad defaults (2.0 m long) cannot hold column 2 at
@@ -118,6 +123,8 @@ const shapeFix = (f) => {
   return null;
 };
 
+// which form fields the Settings page pre-fills (utils/appSettings.js)
+const SETTINGS_MAP = { keys: "snake", concrete: "concrete_grade_fck", steel: "steel_grade_fyk" };
 const DRAFT_KEY = "foundationInputDraft";
 
 const gradeNum = (g) => parseFloat(String(g).replace(/[^0-9]/g, "").slice(0, 2)) || 25;
@@ -145,10 +152,10 @@ export default function FoundationInput() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [form, setForm] = useState(() => {
-    let f = DEFAULTS;
+    let f = applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true });
     try {
       const saved = sessionStorage.getItem(DRAFT_KEY);
-      if (saved) f = { ...DEFAULTS, ...JSON.parse(saved) };
+      if (saved) f = applySettings({ ...DEFAULTS, ...JSON.parse(saved) }, SETTINGS_MAP);
     } catch { /* private mode */ }
     return searchParams.get("type") === "combined" ? withCombinedLength(f) : f;
   });
@@ -156,7 +163,7 @@ export default function FoundationInput() {
   const [error, setError] = useState(null);
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   const reset = () => {
-    setForm(DEFAULTS); setError(null);
+    setForm(applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true })); setError(null);
     try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
   };
 
@@ -294,6 +301,7 @@ export default function FoundationInput() {
           <div className={`text-sm font-bold ${MAIN}`}>Foundation Input (EC2)</div>
           <div className={`text-[11px] ${SUB}`}>EN 1992-1-1 + EN 1997-1 · kN, m</div>
         </div>
+        <div className="ml-auto"><ResetButton variant="top" onReset={reset} what="the foundation input" /></div>
       </header>
 
       {/* foundation type selector */}
@@ -424,8 +432,10 @@ export default function FoundationInput() {
                 <Num label={isCombined ? "Starter bars per column" : "Starter bars (No.)"} value={form.starter_bar_count} onChange={(v) => set({ starter_bar_count: v })} />
                 <div><label className={LABEL}>Starter Bar Dia (mm)</label><Dropdown value={form.starter_bar_dia_mm} onChange={(v) => set({ starter_bar_dia_mm: v })} options={BAR_DIAS} /></div>
                 <Num label="Starter projection above footing" unit="mm" value={form.starter_projection_mm} onChange={(v) => set({ starter_projection_mm: v })} />
+                <div><label className={LABEL}>Link Dia (mm)</label><Dropdown value={form.link_dia_mm} onChange={(v) => set({ link_dia_mm: v })} options={[6, 8, 10, 12]} /></div>
+                <Num label="Column cover (for links)" unit="mm" value={form.column_cover_mm} onChange={(v) => set({ column_cover_mm: v })} />
               </div>
-              <p className={`mt-2 text-xs ${SUB}`}>Used for the detailing and bar bending schedule only. Starter projection blank: soil depth above the footing plus the EC2 lap length. Starter bars 0: none scheduled.</p>
+              <p className={`mt-2 text-xs ${SUB}`}>Used for the detailing and bar bending schedule only. Starter projection blank: soil depth above the footing plus the EC2 lap length. Starter bars 0: none scheduled. Links hold the starters over the column stub at 200 mm (EC2 9.5.3 limit applied); their size is the column less its cover on each side.</p>
             </Card>
 
             {/* 5. Loads */}
@@ -599,10 +609,7 @@ export default function FoundationInput() {
         </div>
 
         {/* action bar at bottom, full width like other input pages */}
-        <div className="mt-6 flex items-center justify-between gap-3 border-t border-[#e2e8f0] dark:border-[#334155] pt-5">
-          <button onClick={reset} className={`flex items-center justify-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-5 py-2.5 text-sm ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#334155]`}>
-            <FiRefreshCw size={15} /> Reset
-          </button>
+        <div className="mt-6 flex items-center justify-end gap-3 border-t border-[#e2e8f0] dark:border-[#334155] pt-5">
           <button onClick={run} disabled={busy}
             className="flex items-center justify-center gap-2 rounded-lg bg-[#0A2F44] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#082636] disabled:opacity-50">
             {busy ? <FiLoader className="animate-spin" size={15} /> : null} Save & Proceed to Design

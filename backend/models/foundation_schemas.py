@@ -61,6 +61,10 @@ class PadFoundationRequest(BaseModel):
     starter_bar_count: int = Field(4, ge=0, le=40)
     starter_bar_dia_mm: float = Field(16, gt=0)
     starter_projection_mm: Optional[float] = Field(None, gt=0)
+    # Links holding the starters over the column stub (book 9.10 / 10.2 mark
+    # 03): size, and the column's own cover that sets the link dimensions.
+    link_dia_mm: float = Field(8, gt=0)
+    column_cover_mm: float = Field(35, gt=0)
 
     footing_length_mm: float = Field(..., gt=0)
     footing_width_mm: float = Field(..., gt=0)
@@ -380,6 +384,10 @@ class CombinedFootingRequest(BaseModel):
     starter_bar_count: int = Field(4, ge=0, le=40)
     starter_bar_dia_mm: float = Field(16, gt=0)
     starter_projection_mm: Optional[float] = Field(None, gt=0)
+    # Links holding the starters over the column stub (book 9.10 / 10.2 mark
+    # 03): size, and the column's own cover that sets the link dimensions.
+    link_dia_mm: float = Field(8, gt=0)
+    column_cover_mm: float = Field(35, gt=0)
 
     design_basis: FoundationDesignBasis = FoundationDesignBasis()
 

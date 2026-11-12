@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   FiArrowLeft,
@@ -12,20 +12,23 @@ import {
   FiMoon,
 } from 'react-icons/fi'
 import { useTheme } from '../contexts/ThemeContext'
+import { SavedDesignRows } from '../components/results/DesignTopBar'
+import { listAllDesigns, deleteDesign, designRoute, designState } from '../utils/savedDesigns'
 
 const SavedDesigns = () => {
   const navigate = useNavigate()
   const { isDarkMode, toggleDarkMode } = useTheme()
-  const [savedDesigns, setSavedDesigns] = useState([])
+  const [savedDesigns, setSavedDesigns] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('quick_designs') || '[]') } catch { return [] }
+  })
+  // designs saved from the results pages (slab, beam, column, foundation, staircase)
+  const [elementDesigns, setElementDesigns] = useState(() => listAllDesigns())
 
-  useEffect(() => {
-    loadSavedDesigns()
-  }, [])
-
-  const loadSavedDesigns = () => {
-    const saved = localStorage.getItem('quick_designs')
-    if (saved) {
-      setSavedDesigns(JSON.parse(saved))
+  const openElementDesign = (d) => navigate(designRoute(d, d.element), { state: designState(d) })
+  const deleteElementDesign = (d) => {
+    if (window.confirm(`Delete "${d.name}"?`)) {
+      deleteDesign(d.element, d.id)
+      setElementDesigns(listAllDesigns())
     }
   }
 
@@ -64,14 +67,14 @@ const SavedDesigns = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <button
-                onClick={() => navigate('/dashboard')}
+                onClick={() => navigate(-1)}
                 className="p-2 rounded-lg hover:bg-[#f3f4f6] dark:hover:bg-[#374151]"
               >
                 <FiArrowLeft className="text-xl text-[#6b7280]" />
               </button>
               <div>
                 <h1 className="text-xl font-bold text-[#02090d] dark:text-white">Saved Designs</h1>
-                <p className="text-sm text-[#6b7280]">Your locally saved quick designs</p>
+                <p className="text-sm text-[#6b7280]">Designs saved in this browser. Click one to open its results.</p>
               </div>
             </div>
             <button
@@ -89,15 +92,27 @@ const SavedDesigns = () => {
       </div>
 
       <div className="max-w-4xl mx-auto px-4 py-8">
+        {elementDesigns.length > 0 && (
+          <div className="mb-8 overflow-hidden rounded-xl border border-[#e5e7eb] bg-white shadow-lg dark:border-[#374151] dark:bg-[#0f172a]">
+            <h2 className="border-b border-[#e5e7eb] px-4 py-3 text-sm font-bold uppercase tracking-wide text-[#0A2F44] dark:border-[#374151] dark:text-[#66a4c2]">
+              Element designs ({elementDesigns.length})
+            </h2>
+            <SavedDesignRows designs={elementDesigns} showElement onOpen={openElementDesign} onDelete={deleteElementDesign} />
+          </div>
+        )}
+        {savedDesigns.length > 0 && elementDesigns.length > 0 && (
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Quick designs</h2>
+        )}
         {savedDesigns.length === 0 ? (
+          elementDesigns.length > 0 ? null :
           <div className="text-center py-12 bg-white dark:bg-[#1f2937] rounded-2xl shadow-xl">
             <FiFolder className="text-5xl text-[#9ca3af] mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-[#02090d] dark:text-white mb-2">
               No saved designs
             </h3>
-            <p className="text-[#6b7280] mb-4">Create and save a quick design to see it here</p>
+            <p className="text-[#6b7280] mb-4">Run a design and press Save on its results page to see it here</p>
             <Link
-              to="/quick-design"
+              to="/new-design"
               className="inline-block px-4 py-2 bg-[#0A2F44] text-white rounded-lg hover:bg-[#082636]"
             >
               Create New Design

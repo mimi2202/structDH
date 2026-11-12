@@ -1,3 +1,4 @@
+import Dropdown from '../components/Dropdown'
 import React, { useState, useEffect } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -215,15 +216,8 @@ const TeamMembers = () => {
                   <label className="block text-sm font-medium text-[#374151] dark:text-[#d1d5db] mb-2">
                     Role
                   </label>
-                  <select
-                    value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white"
-                  >
-                    <option value="member">Member</option>
-                    <option value="admin">Admin</option>
-                    <option value="viewer">Viewer</option>
-                  </select>
+                  <Dropdown value={inviteRole} onChange={(v) => setInviteRole(v)}
+                    options={[{ value: "member", label: "Member" }, { value: "admin", label: "Admin" }, { value: "viewer", label: "Viewer" }]} />
                 </div>
               </div>
               <div className="flex justify-end space-x-3 mt-6">

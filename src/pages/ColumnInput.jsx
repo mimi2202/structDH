@@ -11,9 +11,13 @@ import {
   FiChevronLeft, FiChevronRight,
 } from "react-icons/fi";
 import DesignProgressBar from "../components/ui/DesignProgressBar";
+import ResetButton from "../components/ui/ResetButton";
+import { applySettings } from "../utils/appSettings";
 import Dropdown from "../components/Dropdown";
 import { columnAPI } from "../services/api";
 
+// which form fields the Settings page pre-fills (utils/appSettings.js)
+const SETTINGS_MAP = { keys: "snake", concrete: "concrete_grade", steel: "steel_grade" };
 const DRAFT_KEY = "columnInputDraft";
 
 const CARD = "bg-white dark:bg-[#1f2937] rounded-xl shadow-sm border border-[#e2e8f0] dark:border-[#334155]";
@@ -196,7 +200,7 @@ export default function ColumnInput() {
   const [form, setForm] = useState(() => {
     try {
       const saved = sessionStorage.getItem(DRAFT_KEY);
-      if (!saved) return DEFAULTS;
+      if (!saved) return applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true });
       // A draft saved before the face split moved to Step 4 still carries
       // custom_faces / n_bars_b_face / n_bars_h_face at the top level, and a
       // spread merge lets those stale keys beat the new defaults. Drop them
@@ -217,8 +221,8 @@ export default function ColumnInput() {
         }
         rest.levelEdits = migrated;
       }
-      return { ...DEFAULTS, ...rest };
-    } catch { return DEFAULTS; }
+      return applySettings({ ...DEFAULTS, ...rest }, SETTINGS_MAP);
+    } catch { return applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true }); }
   });
   const [step, setStep] = useState(0);
   const [maxReached, setMaxReached] = useState(0);
@@ -523,8 +527,7 @@ export default function ColumnInput() {
   };
 
   const reset = () => {
-    if (!window.confirm("Reset all fields to defaults?")) return;
-    setForm(DEFAULTS); setStep(0); setMaxReached(0); setError(null);
+    setForm(applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true })); setStep(0); setMaxReached(0); setError(null);
     try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
   };
 
@@ -538,7 +541,7 @@ export default function ColumnInput() {
             <div className={`text-[11px] ${SUB}`}>EN 1992-1-1 · kN, mm, m</div>
           </div>
         </div>
-        <button onClick={reset} className={`text-xs ${SUB} hover:underline`}>Reset</button>
+        <ResetButton variant="top" onReset={reset} what="the column input" />
       </header>
 
       <div className="border-b border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1f2937] px-4 py-3">

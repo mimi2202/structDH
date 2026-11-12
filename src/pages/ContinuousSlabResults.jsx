@@ -8,20 +8,24 @@ import {
 import DetailedReport from "../components/DetailedReport";
 import ReportSections from "../components/ReportSections";
 import { exportElementToPdf } from "../utils/exportPdf";
+import FullDocument from "../components/results/FullDocument";
+import { DIAGRAM } from "../components/results/diagramTheme";
 import { buildCoverHtml } from "../utils/reportCover";
+import DesignTopBar from "../components/results/DesignTopBar";
 
 const CARD = "bg-white dark:bg-[#1f2937] rounded-xl border border-[#e2e8f0] dark:border-[#334155] shadow-sm";
 const MAIN = "text-[#0F172A] dark:text-white";
 const SUB = "text-[#64748b] dark:text-[#94a3b8]";
 const ACCENT = "text-[#0A2F44] dark:text-[#66a4c2]";
-const HOG = "#ef4444";
-const SAG = "#22c55e";
+const HOG = DIAGRAM.hogging;   // negative / hogging (shared colours, components/results/diagramTheme.js)
+const SAG = DIAGRAM.sagging;   // positive / sagging
+const SHR = DIAGRAM.shear;
 
 // Overview, then one tab per check in depth; "Download" prints the tab on
 // screen behind a cover page.
 const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection & Durability"];
 const TAB_NOTES = {
-  "Overview": "load envelope, moment and shear diagrams, section and the status of every check.",
+  "Overview": "the complete design document: summary, flexural, shear, deflection and durability sections in full, and the full calculation report, numbered.",
   "Flexural Design": "loads, pattern loading and the continuous analysis, then the span (sagging) and support (hogging) reinforcement.",
   "Shear Design": "design shear at each support, reduced to d from the face, against the resistance without shear reinforcement (EC2 6.2.2).",
   "Deflection & Durability": "span/depth deflection check (EC2 7.4.2), cover for exposure, fire resistance and crack control.",
@@ -84,8 +88,109 @@ export default function ContinuousSlabResults() {
     status: summary.status, report,
   }));
 
+  const overviewNode = (
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <Card n="1" title="Envelope (ULS)">
+          <KV rows={[
+            ["Max Sagging", `${envelope.max_sagging_moment} kNm/m`],
+            ["Max Hogging", `${envelope.max_hogging_moment} kNm/m`],
+            ["Max Shear", `${envelope.max_shear_force} kN/m`],
+            ["Ultimate w_Ed", `${envelope.ultimate_load} kN/m²`],
+            ["Service load", `${envelope.service_load} kN/m²`],
+          ]} status={summary.status} failedChecks={failedChecks} />
+        </Card>
+
+        <Card n="2" title="Bending Moment Diagram">
+          <BMD spans={bmdSpans} supports={bmdSupports} />
+          <Legend items={[["Hogging (−)", HOG], ["Sagging (+)", SAG]]} />
+        </Card>
+        <Card n="3" title="Shear Force Diagram">
+          <SFD spans={bmdSpans} supports={bmdSupports} />
+          <Legend items={[["Shear force", SHR]]} />
+        </Card>
+
+        <Card n="8" title="Compliance Summary" span2>
+          <Tbl head={["Check", "Ratio", "Limit", "Status"]}
+            rows={compliance.map((c) => [c.check, c.ratio, c.limit, ok(c.status === "PASS")])} />
+        </Card>
+        <Card n="9" title="Section">
+          <KV rows={[
+            ["Thickness", `${summary.thickness} mm`],
+            ["Eff. depth d", `${summary.effective_depth} mm`],
+            ["Governing bars", `T${summary.selected_bar_diameter}@${summary.selected_spacing}`],
+            ["Utilisation", `${summary.utilization_ratio}`],
+          ]} />
+        </Card>
+
+        <Card n="7" title="Cost Estimate">
+          <KV rows={[
+            ["Concrete", `${cost_breakdown.concrete.cost}`],
+            ["Steel", `${cost_breakdown.steel.cost}`],
+            ["Formwork", `${cost_breakdown.formwork.cost}`],
+            ["Total (1 m strip)", `${cost_breakdown.total}`],
+            ["Per m run", `${cost_breakdown.total_per_sqm}`],
+          ]} />
+        </Card>
+      </div>
+  );
+  const flexuralNode = (
+      <div className="space-y-5">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <Card n="4" title="Span (Sagging) Reinforcement" span3>
+          <Tbl head={["Span", "L (m)", "M_sag (kNm/m)", "As,req", "Provided", "Status"]}
+            rows={spans.map((s) => [`Span ${s.index}`, s.length, s.max_sagging_moment, Math.round(s.area_required),
+              `T${s.bar_diameter}@${s.spacing} (${Math.round(s.area_provided)})`, ok(s.status === "PASS")])} />
+        </Card>
+        <Card n="6" title="Support (Hogging) Reinforcement" span3>
+          <Tbl head={["Support", "M_hog (kNm/m)", "V (kN/m)", "As,req", "Provided", "Status"]}
+            rows={supports.map((s) => [s.position, s.hogging_moment, s.shear,
+              s.hogging_moment > 0 ? Math.round(s.area_required) : "nominal",
+              `T${s.bar_diameter}@${s.spacing} (${Math.round(s.area_provided)})`, ok(s.status === "PASS")])} />
+        </Card>
+        </div>
+        <ReportSections report={report} match={/Loads|Load Patterns|Continuous Analysis|Node Moments|Reinforcement/i} heading="Bending design — calculation" />
+      </div>
+  );
+  const shearNode = (
+      <div className="space-y-5">
+        <Card n="5" title="Shear at Supports" span3>
+          <Tbl head={["Support", "V at face (kN/m)", "V at d (kN/m)", "V_Rd,c (kN/m)", "Status"]}
+            rows={supports.map((s) => [s.position, s.shear, s.shear_reduced, shear.shear_resistance, ok(s.shear_reduced <= shear.shear_resistance)])} />
+          <p className={`mt-2 text-[11px] ${SUB}`}>Governing design shear {shear.design_shear} kN/m against V_Rd,c {shear.shear_resistance} kN/m: {shear.status}.</p>
+        </Card>
+        <ReportSections report={report} match={/^10\. Shear/i} heading="Shear design — calculation" />
+      </div>
+  );
+  const deflectionNode = (
+      <div className="space-y-5">
+        <Card n="5" title="Deflection & Shear" span3>
+          <Tbl head={["Check", "Actual", "Limit", "Status"]} rows={[
+            ["Span/depth (L/d)", deflection.actual_deflection, deflection.allowable_deflection, ok(deflection.status === "PASS")],
+            ["Shear V_Ed (kN/m)", shear.design_shear, shear.shear_resistance, ok(shear.status === "PASS")],
+          ]} />
+        </Card>
+        <ReportSections report={report} match={/Deflection|Durability|Minimum Reinforcement/i} heading="Deflection, durability, fire and cracking — calculation" />
+      </div>
+  );
   return (
     <div ref={sheetRef} className="flex flex-col">
+      <DesignTopBar element="continuous-slab" className="mb-4"
+        crumbs={[
+          { label: "Slab Design", to: "/structural-input" },
+          { label: "Continuous Slab", to: "/continuous-slab" },
+          { label: "Results" },
+        ]}
+        onNew={() => navigate("/continuous-slab")}
+        save={{
+          name: `${spans.length}-span continuous slab, ${spans.map((s) => s.length).join(" + ")} m`,
+          status: summary.status,
+          subtitle: [summary.concrete_grade, summary.steel_grade].filter(Boolean).join(" · "),
+        }}
+        onOpened={() => setTab("Overview")}
+        menu={[
+          ["Detailed report", () => setReportOpen(true)],
+          ["Download report (PDF)", download],
+        ]} />
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className={`text-lg font-bold uppercase tracking-wide ${ACCENT}`}>Continuous One-Way Slab — EC2</h1>
@@ -141,92 +246,19 @@ export default function ContinuousSlabResults() {
       </div>
 
       {tab === "Overview" && (
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <Card n="1" title="Envelope (ULS)">
-          <KV rows={[
-            ["Max Sagging", `${envelope.max_sagging_moment} kNm/m`],
-            ["Max Hogging", `${envelope.max_hogging_moment} kNm/m`],
-            ["Max Shear", `${envelope.max_shear_force} kN/m`],
-            ["Ultimate w_Ed", `${envelope.ultimate_load} kN/m²`],
-            ["Service load", `${envelope.service_load} kN/m²`],
-          ]} status={summary.status} failedChecks={failedChecks} />
-        </Card>
-
-        <Card n="2" title="Bending Moment Diagram">
-          <BMD spans={bmdSpans} supports={bmdSupports} />
-          <Legend items={[["Hogging (−)", HOG], ["Sagging (+)", SAG]]} />
-        </Card>
-        <Card n="3" title="Shear Force Diagram">
-          <SFD spans={bmdSpans} supports={bmdSupports} />
-          <Legend items={[["+ve", HOG], ["−ve", SAG]]} />
-        </Card>
-
-        <Card n="8" title="Compliance Summary" span2>
-          <Tbl head={["Check", "Ratio", "Limit", "Status"]}
-            rows={compliance.map((c) => [c.check, c.ratio, c.limit, ok(c.status === "PASS")])} />
-        </Card>
-        <Card n="9" title="Section">
-          <KV rows={[
-            ["Thickness", `${summary.thickness} mm`],
-            ["Eff. depth d", `${summary.effective_depth} mm`],
-            ["Governing bars", `T${summary.selected_bar_diameter}@${summary.selected_spacing}`],
-            ["Utilisation", `${summary.utilization_ratio}`],
-          ]} />
-        </Card>
-
-        <Card n="7" title="Cost Estimate">
-          <KV rows={[
-            ["Concrete", `${cost_breakdown.concrete.cost}`],
-            ["Steel", `${cost_breakdown.steel.cost}`],
-            ["Formwork", `${cost_breakdown.formwork.cost}`],
-            ["Total (1 m strip)", `${cost_breakdown.total}`],
-            ["Per m run", `${cost_breakdown.total_per_sqm}`],
-          ]} />
-        </Card>
-      </div>
+        <FullDocument report={report} parts={[
+          { title: "Design Summary", node: overviewNode },
+          { title: "Flexural Design", node: flexuralNode },
+          { title: "Shear Design", node: shearNode },
+          { title: "Deflection & Durability", node: deflectionNode },
+        ]} />
       )}
 
-      {tab === "Flexural Design" && (
-      <div className="space-y-5">
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <Card n="4" title="Span (Sagging) Reinforcement" span3>
-          <Tbl head={["Span", "L (m)", "M_sag (kNm/m)", "As,req", "Provided", "Status"]}
-            rows={spans.map((s) => [`Span ${s.index}`, s.length, s.max_sagging_moment, Math.round(s.area_required),
-              `T${s.bar_diameter}@${s.spacing} (${Math.round(s.area_provided)})`, ok(s.status === "PASS")])} />
-        </Card>
-        <Card n="6" title="Support (Hogging) Reinforcement" span3>
-          <Tbl head={["Support", "M_hog (kNm/m)", "V (kN/m)", "As,req", "Provided", "Status"]}
-            rows={supports.map((s) => [s.position, s.hogging_moment, s.shear,
-              s.hogging_moment > 0 ? Math.round(s.area_required) : "nominal",
-              `T${s.bar_diameter}@${s.spacing} (${Math.round(s.area_provided)})`, ok(s.status === "PASS")])} />
-        </Card>
-        </div>
-        <ReportSections report={report} match={/Loads|Load Patterns|Continuous Analysis|Node Moments|Reinforcement/i} heading="Bending design — calculation" />
-      </div>
-      )}
+      {tab === "Flexural Design" && flexuralNode}
 
-      {tab === "Shear Design" && (
-      <div className="space-y-5">
-        <Card n="5" title="Shear at Supports" span3>
-          <Tbl head={["Support", "V at face (kN/m)", "V at d (kN/m)", "V_Rd,c (kN/m)", "Status"]}
-            rows={supports.map((s) => [s.position, s.shear, s.shear_reduced, shear.shear_resistance, ok(s.shear_reduced <= shear.shear_resistance)])} />
-          <p className={`mt-2 text-[11px] ${SUB}`}>Governing design shear {shear.design_shear} kN/m against V_Rd,c {shear.shear_resistance} kN/m: {shear.status}.</p>
-        </Card>
-        <ReportSections report={report} match={/^10\. Shear/i} heading="Shear design — calculation" />
-      </div>
-      )}
+      {tab === "Shear Design" && shearNode}
 
-      {tab === "Deflection & Durability" && (
-      <div className="space-y-5">
-        <Card n="5" title="Deflection & Shear" span3>
-          <Tbl head={["Check", "Actual", "Limit", "Status"]} rows={[
-            ["Span/depth (L/d)", deflection.actual_deflection, deflection.allowable_deflection, ok(deflection.status === "PASS")],
-            ["Shear V_Ed (kN/m)", shear.design_shear, shear.shear_resistance, ok(shear.status === "PASS")],
-          ]} />
-        </Card>
-        <ReportSections report={report} match={/Deflection|Durability|Minimum Reinforcement/i} heading="Deflection, durability, fire and cracking — calculation" />
-      </div>
-      )}
+      {tab === "Deflection & Durability" && deflectionNode}
 
       <div className="cb-no-print mt-6 flex items-center justify-between border-t border-[#e2e8f0] pt-4 dark:border-[#334155]">
         <button onClick={() => navigate("/continuous-slab")} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}><FiArrowLeft size={15} /> Back to Input</button>
@@ -248,7 +280,7 @@ export default function ContinuousSlabResults() {
 function Card({ n, title, children, span2, span3 }) {
   return (
     <section className={`${CARD} ${span3 ? "lg:col-span-3" : span2 ? "lg:col-span-2" : ""}`}>
-      <header className="border-b border-[#e2e8f0] px-4 py-2.5 dark:border-[#334155]"><h3 className="text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">{n}. {title}</h3></header>
+      <header className="border-b border-[#e2e8f0] px-4 py-2.5 dark:border-[#334155]"><h3 className="doc-h text-[11px] font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]"><span className="doc-n">{n}. </span>{title}</h3></header>
       <div className="p-4">{children}</div>
     </section>
   );
@@ -305,12 +337,12 @@ function BMD({ spans, supports }) {
       <line x1={nodes[0]} y1={mid} x2={nodes[nodes.length - 1]} y2={mid} stroke="#94a3b8" strokeWidth="1" />
       {spans.map((s, i) => {
         const xa = nodes[i], xb = nodes[i + 1], xc = (xa + xb) / 2, hh = (s.m_sagging / peak) * amp;
-        return <g key={i}><path d={`M${xa},${mid} Q${xc},${mid + hh * 2} ${xb},${mid} Z`} fill={SAG} fillOpacity="0.2" stroke={SAG} strokeWidth="1.3" /><text x={xc} y={mid + 28} fontSize="8" fill={SAG} textAnchor="middle">+{s.m_sagging}</text></g>;
+        return <g key={i}><path d={`M${xa},${mid} Q${xc},${mid + hh * 2} ${xb},${mid} Z`} fill={SAG} fillOpacity={DIAGRAM.fillOpacity} stroke={SAG} strokeWidth="1.3" /><text x={xc} y={mid + 28} fontSize="8" fill={SAG} textAnchor="middle">+{s.m_sagging}</text></g>;
       })}
       {supports.map((s, i) => {
         if (s.m_hogging <= 0) return null;
         const x = nodes[s.index], hh = (s.m_hogging / peak) * amp, w = 22;
-        return <g key={`h${i}`}><path d={`M${x - w},${mid} Q${x},${mid - hh * 2} ${x + w},${mid} Z`} fill={HOG} fillOpacity="0.2" stroke={HOG} strokeWidth="1.3" /><text x={x} y={mid - 14} fontSize="8" fill={HOG} textAnchor="middle">−{s.m_hogging}</text></g>;
+        return <g key={`h${i}`}><path d={`M${x - w},${mid} Q${x},${mid - hh * 2} ${x + w},${mid} Z`} fill={HOG} fillOpacity={DIAGRAM.fillOpacity} stroke={HOG} strokeWidth="1.3" /><text x={x} y={mid - 14} fontSize="8" fill={HOG} textAnchor="middle">−{s.m_hogging}</text></g>;
       })}
       {nodes.map((x, i) => <line key={`n${i}`} x1={x} y1={mid - 3} x2={x} y2={mid + 3} stroke="#64748b" strokeWidth="1.5" />)}
     </svg>
@@ -327,9 +359,9 @@ function SFD({ spans, supports }) {
         const xa = nodes[i], xb = nodes[i + 1];
         const vL = supports[i]?.shear || 0, vR = supports[i + 1]?.shear || 0;
         const hL = (vL / peak) * amp, hR = (vR / peak) * amp;
-        return <path key={i} d={`M${xa},${mid} L${xa},${mid - hL} L${xb},${mid + hR} L${xb},${mid} Z`} fill={SAG} fillOpacity="0.15" stroke={SAG} strokeWidth="1.2" />;
+        return <path key={i} d={`M${xa},${mid} L${xa},${mid - hL} L${xb},${mid + hR} L${xb},${mid} Z`} fill={SHR} fillOpacity={DIAGRAM.fillOpacity} stroke={SHR} strokeWidth="1.2" />;
       })}
-      {supports.map((s, i) => <text key={i} x={nodes[i]} y={mid - amp - 4} fontSize="7.5" fill={HOG} textAnchor="middle">{s.shear}</text>)}
+      {supports.map((s, i) => <text key={i} x={nodes[i]} y={mid - amp - 4} fontSize="7.5" fill={SHR} textAnchor="middle">{s.shear}</text>)}
       {nodes.map((x, i) => <line key={`n${i}`} x1={x} y1={mid - 3} x2={x} y2={mid + 3} stroke="#64748b" strokeWidth="1.5" />)}
     </svg>
   );

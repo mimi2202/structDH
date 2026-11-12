@@ -2,13 +2,19 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  FiHome, FiChevronRight, FiRefreshCw, FiSave, FiArrowRight,
+  FiHome, FiRefreshCw, FiSave, FiArrowRight,
   FiLoader, FiAlertTriangle, FiInfo, FiPlus, FiTrash2,
 } from "react-icons/fi";
 import DesignProgressBar from "../components/ui/DesignProgressBar";
+import ResetButton from "../components/ui/ResetButton";
+import { applySettings } from "../utils/appSettings";
+import { OCCUPANCY } from "../utils/loadLibrary";
+import { Crumbs } from "../components/results/DesignTopBar";
 import Dropdown from "../components/Dropdown";
 import { continuousSlabAPI } from "../services/api";
 
+// which form fields the Settings page pre-fills (utils/appSettings.js)
+const SETTINGS_MAP = { keys: "camel", concrete: "concreteGrade", steel: "steelGrade" };
 const DRAFT_KEY = "continuousSlabInputDraft";
 
 const CARD = "bg-white dark:bg-[#1f2937] rounded-xl shadow-sm border border-[#e2e8f0] dark:border-[#334155]";
@@ -19,7 +25,7 @@ const SUB = "text-[#64748b] dark:text-[#94a3b8]";
 const MAIN = "text-[#0F172A] dark:text-white";
 
 const CONCRETE_GRADES = ["C20/25", "C25/30", "C30/37", "C35/45", "C40/50"];
-const STEEL_GRADES = ["B500", "B460"];
+const STEEL_GRADES = ["B500", "B460", "B410"];
 const SUPPORTS = [
   { value: "pinned", label: "Pinned" },
   { value: "fixed", label: "Fixed" },
@@ -30,19 +36,8 @@ const REGIONS = ["Nigeria", "UK"];
 const EXPOSURE_CLASSES = ["XC1", "XC2", "XC3", "XC4"];
 const FIRE_RATINGS = [0, 30, 60, 90, 120, 180, 240];   // minutes, EN 1992-1-2 Table 5.8 (0 = not checked)
 const CRACK_LIMITS = ["0.2", "0.3", "0.4"];            // mm
-// EN 1991-1-1 (indicative) imposed loads by occupancy -- picking one fills in
-// the live load, which stays editable. Also sent to the backend, where it sets
-// psi_2 for the crack check ("Custom" = not stated, psi_2 = 0.6 assumed).
-const OCCUPANCY = [
-  { value: "", label: "Custom (enter live load)" },
-  { value: "residential", label: "Residential (1.5)", qk: 1.5 },
-  { value: "office", label: "Office (2.5)", qk: 2.5 },
-  { value: "classroom", label: "Classroom / School (3.0)", qk: 3.0 },
-  { value: "retail", label: "Retail / Shop (4.0)", qk: 4.0 },
-  { value: "assembly", label: "Assembly / Public (5.0)", qk: 5.0 },
-  { value: "parking", label: "Parking (2.5)", qk: 2.5 },
-  { value: "storage", label: "Storage (7.5)", qk: 7.5 },
-];
+// Imposed load by occupancy: picking one fills in the live load (still editable)
+// and sets psi_2 for the crack check. Shared with the Load Cases page.
 
 const DEFAULTS = {
   spans: ["4.0", "4.0", "4.0"],
@@ -78,9 +73,9 @@ export default function ContinuousSlabInput() {
   const [form, setForm] = useState(() => {
     try {
       const saved = sessionStorage.getItem(DRAFT_KEY);
-      return saved ? { ...DEFAULTS, ...JSON.parse(saved) } : DEFAULTS;
+      return saved ? applySettings({ ...DEFAULTS, ...JSON.parse(saved) }, SETTINGS_MAP) : applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true });
     } catch {
-      return DEFAULTS;
+      return applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true });
     }
   });
   const [busy, setBusy] = useState(false);
@@ -113,8 +108,7 @@ export default function ContinuousSlabInput() {
   const totalLoad = ff + ll + adl + all_;
 
   const reset = () => {
-    if (!window.confirm("Reset all fields to defaults?")) return;
-    setForm(DEFAULTS);
+    setForm(applySettings(DEFAULTS, { ...SETTINGS_MAP, fresh: true }));
     setError(null);
     try {
       sessionStorage.removeItem(DRAFT_KEY);
@@ -127,11 +121,6 @@ export default function ContinuousSlabInput() {
     const spans = form.spans.map((s) => parseFloat(s)).filter((n) => Number.isFinite(n) && n > 0);
     if (spans.length < 1) {
       setError("Enter at least one span length.");
-      return;
-    }
-    const oversized = spans.filter((s) => s > 4.5);
-    if (oversized.length) {
-      setError(`Span length(s) ${oversized.join(", ")} m exceed the practical one-way slab limit of 4.5 m.`);
       return;
     }
     setBusy(true);
@@ -161,12 +150,13 @@ export default function ContinuousSlabInput() {
             </div>
             <span className={`text-sm font-bold ${MAIN}`}>Struct Design Hub</span>
           </div>
-          <nav className={`hidden md:flex items-center gap-1.5 text-[13px] ${SUB}`}>
-            <span>Slab Design</span>
-            <FiChevronRight size={13} />
-            <span className={`font-medium ${MAIN}`}>Continuous One-Way Slab</span>
-          </nav>
+          <Crumbs items={[
+            { label: "Slab Design", to: "/structural-input" },
+            { label: "Continuous One-Way Slab", to: "/continuous-slab" },
+            { label: "Input" },
+          ]} />
         </div>
+        <ResetButton variant="top" onReset={reset} what="the continuous slab input" />
       </header>
 
       <div className="mx-auto max-w-4xl px-6 py-6">
@@ -202,7 +192,7 @@ export default function ContinuousSlabInput() {
                   </div>
                 ))}
               </div>
-              <p className={`mt-3 text-xs ${SUB}`}>Total length: {totalLength.toFixed(2)} m. Each span must be &le; 4.5 m.</p>
+              <p className={`mt-3 text-xs ${SUB}`}>Total length: {totalLength.toFixed(2)} m. Spans over 4.5 m are designed, but deflection usually governs and the report notes it.</p>
               <div className="mt-4 grid grid-cols-2 gap-4">
                 <div>
                   <label className={LABEL}>Start support</label>
@@ -370,9 +360,6 @@ export default function ContinuousSlabInput() {
         </div>
 
         <div className="mt-6 flex items-center justify-end gap-3">
-          <button onClick={reset} className={`flex items-center gap-2 rounded-lg border border-[#e2e8f0] px-4 py-2 text-sm dark:border-[#334155] ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#334155]`}>
-            <FiRefreshCw size={15} /> Reset
-          </button>
           <button onClick={run} disabled={busy} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-5 py-2 text-sm font-medium text-white hover:bg-[#082636] disabled:opacity-50">
             {busy ? <FiLoader className="animate-spin" size={15} /> : null}
             {busy ? "Designing…" : "Run Design"} <FiArrowRight size={15} />

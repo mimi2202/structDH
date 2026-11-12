@@ -3,6 +3,9 @@ import React, { useState, useRef } from "react";
 import { exportElementToPdf } from "../utils/exportPdf";
 import { buildCoverHtml } from "../utils/reportCover";
 import ReportSections from "../components/ReportSections";
+import FullDocument from "../components/results/FullDocument";
+import DesignTopBar from "../components/results/DesignTopBar";
+import FootingDetailDrawing from "../components/results/FootingDetailDrawing";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FiArrowLeft, FiCheckCircle, FiXCircle, FiFileText, FiX, FiAlertTriangle, FiDownload } from "react-icons/fi";
 import Plot from "react-plotly.js";
@@ -17,7 +20,7 @@ const ACCENT = "#0A2F44", ACCENT_D = "#66a4c2";
 // on screen, behind a cover page.
 const PAD_TABS = ["Overview", "Bearing", "Flexural Design", "Shear & Punching", "Detailing & Schedule"];
 const TAB_NOTES = {
-  "Overview": "geometry, bearing summary and the status of every check.",
+  "Overview": "the complete design document: summary, bearing, flexural design, shear and punching, detailing and bar schedule in full, and the full calculation report, numbered.",
   "Bearing": "soil pressure under the footing from the service loads plus self-weight, checked against the allowable bearing pressure, with eccentricity and uplift.",
   "Flexural Design": "design moments at the column face and the bottom reinforcement in each direction.",
   "Shear & Punching": "one-way shear at d from the column face and punching shear around the column (EC2 6.2 and 6.4).",
@@ -66,8 +69,119 @@ export default function FoundationResults() {
   const g = r.geometry, sp = r.soil_pressure, fx = r.flexure.x, fy = r.flexure.y;
   const sx = r.one_way_shear.x, sy = r.one_way_shear.y, pn = r.punching, u = r.utilisation;
 
+  const overviewNode = (
+          <>
+            {/* 1. adopted geometry + 2. design results */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Panel title={r.auto_sized ? "Foundation Geometry (Sized from bearing)" : "Foundation Geometry (Adopted)"}>
+                <div className="flex items-center gap-4">
+                  <PlanSVG g={g} />
+                  <div className="flex-1 space-y-1.5">
+                    <KV label="Footing" value={`${g.footing_length_mm} × ${g.footing_width_mm} mm`} />
+                    <KV label="Thickness" value={`${g.footing_depth_mm} mm`} />
+                    <KV label="Column" value={g.column_shape === "circular" ? `Ø${g.column_x_mm} mm` : `${g.column_x_mm} × ${g.column_y_mm} mm`} />
+                    {(g.column_offset_x_mm || g.column_offset_y_mm) ? <KV label="Offset ex / ey" value={`${g.column_offset_x_mm} / ${g.column_offset_y_mm} mm`} /> : null}
+                    {g.column_fixity === "pinned" && <KV label="Base" value="Pinned (no moment)" />}
+                    <KV label="Projection a_x / a_y" value={`${g.projection_x_mm} / ${g.projection_y_mm} mm`} />
+                    <KV label="Eff. depth d_x / d_y" value={`${g.d_eff_x_mm} / ${g.d_eff_y_mm} mm`} />
+                    <KV label="Cover" value={`${g.cover_mm} mm`} />
+                  </div>
+                </div>
+              </Panel>
+
+              <Panel title="Bearing (Service) & Design Pressure (Ultimate)">
+                {r.sls_total_load_kN != null && (
+                  <KV label={r.sls_from_uls ? "ULS-derived load + footing + soil" : "Service load + footing + soil"}
+                    value={`${r.sls_total_load_kN} kN (W_f ${r.footing_weight_kN}, W_s ${r.soil_weight_kN ?? 0})`} />
+                )}
+                <KV label="Avg pressure q0 (SLS)" value={`${sp.q0} kN/m²`} />
+                <KV label="Max pressure qmax (SLS)" value={`${sp.qmax} kN/m²`} strong warn={!sp.bearing_ok} />
+                <KV label="Min pressure qmin (SLS)" value={`${sp.qmin} kN/m²`} warn={!sp.uplift_ok} />
+                <KV label="Allowable bearing" value={`${r.materials.allowable_bearing_kN_m2} kN/m²`} />
+                <KV label="Bearing utilisation" value={`${u.bearing_pct}%`} strong warn={u.bearing_pct > 100} />
+                {r.soil_pressure_uls && <KV label="Design pressure qmax (ULS)" value={`${r.soil_pressure_uls.qmax} kN/m²`} />}
+                <KV label="Design Mx / My" value={`${r.design_moments.Mx_kNm_per_m} / ${r.design_moments.My_kNm_per_m} kNm/m`} />
+              </Panel>
+            </div>
+
+            {/* design summary chips */}
+            <Panel title="Design Summary">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <Chip label="Bearing (warning)" pct={u.bearing_pct} ok={sp.bearing_ok} />
+                <Chip label="One-way shear" ok={sx.status === "OK" && sy.status === "OK"} />
+                <Chip label="Punching" pct={u.punching_pct} ok={pn.status === "OK"} />
+                <Chip label="Reinforcement" ok={fx.status === "OK" && fy.status === "OK"} />
+                <Chip label="Uplift" ok={sp.uplift_ok} />
+                {r.detailing && <Chip label="Detailing" ok={r.detailing.status === "OK"} />}
+              </div>
+            </Panel>
+
+          </>
+  );
+  const bearingNode = (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Panel title="Soil Pressure Distribution (Service)">
+                <SoilPressure3D corners={sp.corners} g={g} allow={r.materials.allowable_bearing_kN_m2} />
+                <p className={`mt-2 text-xs ${SUB}`}>qmax {sp.qmax} / qmin {sp.qmin} kN/m². {sp.bearing_ok ? "Within allowable." : "Exceeds allowable bearing (warning only: not counted in the overall result)."}</p>
+              </Panel>
+
+              <Panel title="Plan">
+                <div className="flex justify-center"><PlanSVG g={g} /></div>
+                <p className={`mt-2 text-xs ${SUB}`}>Bearing is checked on the service loads plus the footing self-weight against the allowable bearing pressure; the column offset and moments tilt the pressure across the base.</p>
+              </Panel>
+            </div>
+            <ReportSections report={r.report} match={/Eccentricity|Soil Pressure/i} heading="Bearing and eccentricity — calculation" />
+          </>
+  );
+  const flexuralNode = (
+          <>
+            {/* 3. reinforcement design */}
+            <Panel title="Reinforcement Design (Bottom, Both Directions)">
+              <Table
+                head={["Direction", "d (mm)", "As,req (mm²/m)", "As,min", "As,prov", "Bar / Spacing", "Status"]}
+                rows={[
+                  ["X", fx.d_eff_mm, fx.As_req, fx.As_min, fx.As_provided, `Y${fx.bar_dia}@${fx.spacing_mm}`, <Badge key="x" ok={fx.status === "OK"}>{fx.status}</Badge>],
+                  ["Y", fy.d_eff_mm, fy.As_req, fy.As_min, fy.As_provided, `Y${fy.bar_dia}@${fy.spacing_mm}`, <Badge key="y" ok={fy.status === "OK"}>{fy.status}</Badge>],
+                ]}
+              />
+            </Panel>
+
+              <Panel title="Reinforcement Layout (Bottom)">
+                <RebarLayout g={g} fx={fx} fy={fy} />
+                <p className={`mt-2 text-xs ${SUB}`}>Bottom mesh: X {`Y${fx.bar_dia}@${fx.spacing_mm}`}, Y {`Y${fy.bar_dia}@${fy.spacing_mm}`}. Cover {g.cover_mm} mm.</p>
+              </Panel>
+            <ReportSections report={r.report} match={/Design Moments|Flexural/i} heading="Bending design — calculation" />
+          </>
+  );
+  const shearNode = (
+          <>
+            {/* 6. shear checks */}
+            <Panel title="Shear Checks">
+              <Table
+                head={["Check", "Direction", "VEd / vEd", "Resistance", "Status"]}
+                rows={[
+                  ["One-way shear", "X", `${sx.VEd_kN_per_m} kN/m`, `${sx.VRdc_kN_per_m} kN/m`, <Badge key="sx" ok={sx.status === "OK"}>{sx.status}</Badge>],
+                  ["One-way shear", "Y", `${sy.VEd_kN_per_m} kN/m`, `${sy.VRdc_kN_per_m} kN/m`, <Badge key="sy" ok={sy.status === "OK"}>{sy.status}</Badge>],
+                  pn.applicable === false
+                    ? ["Punching (6.4.4)", "—", "no perimeter fits", "one-way shear governs", <Badge key="pn" ok>N/A</Badge>]
+                    : ["Punching (6.4.4)", pn.a_mm != null ? `a = ${pn.a_mm} mm` : "—", `${pn.vEd_MPa} MPa`, `${pn.vRd_MPa ?? pn.vRdc_MPa} MPa`, <Badge key="pn" ok={pn.status === "OK"}>{pn.status}</Badge>],
+                  ...(pn.v0_MPa != null ? [["Punching, column face", "u0", `${pn.v0_MPa} MPa`, `${pn.vRdmax_MPa} MPa (max)`, <Badge key="p0" ok={pn.v0_MPa <= pn.vRdmax_MPa}>{pn.v0_MPa <= pn.vRdmax_MPa ? "OK" : "NOT OK"}</Badge>]] : []),
+                ]}
+              />
+              {(sx.rho_l != null) && (
+                <p className={`mt-2 text-xs ${SUB}`}>One-way shear at d from the column face with ρl from the bottom steel provided (X {sx.rho_l}, Y {sy.rho_l}). Punching per EC2 6.4.4(2): control perimeters searched at a ≤ 2d, relief from the soil pressure inside, vRd = vRd,c·2d/a{pn.beta != null ? `, β = ${pn.beta}` : ""}.</p>
+              )}
+            </Panel>
+
+            <ReportSections report={r.report} match={/One-Way Shear|Punching/i} heading="Shear and punching — calculation" />
+          </>
+  );
   return (
     <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#111827] px-4 sm:px-6 2xl:px-10 py-6">
+      <FootingTopBar r={r} meta={meta} navigate={navigate} setTab={setTab} setShowReport={setShowReport}
+        type="Pad Footing" input="/foundation-input"
+        name={`Pad footing ${g.footing_length_mm} × ${g.footing_width_mm} × ${g.footing_depth_mm} mm`} />
       <div ref={sheetRef} className="w-full space-y-5">
         {/* header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
@@ -124,116 +238,20 @@ export default function FoundationResults() {
         <TabBar tabs={PAD_TABS} tab={tab} setTab={setTab} />
 
         {tab === "Overview" && (
-          <>
-            {/* 1. adopted geometry + 2. design results */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Panel title={r.auto_sized ? "Foundation Geometry (Sized from bearing)" : "Foundation Geometry (Adopted)"}>
-                <div className="flex items-center gap-4">
-                  <PlanSVG g={g} />
-                  <div className="flex-1 space-y-1.5">
-                    <KV label="Footing" value={`${g.footing_length_mm} × ${g.footing_width_mm} mm`} />
-                    <KV label="Thickness" value={`${g.footing_depth_mm} mm`} />
-                    <KV label="Column" value={g.column_shape === "circular" ? `Ø${g.column_x_mm} mm` : `${g.column_x_mm} × ${g.column_y_mm} mm`} />
-                    {(g.column_offset_x_mm || g.column_offset_y_mm) ? <KV label="Offset ex / ey" value={`${g.column_offset_x_mm} / ${g.column_offset_y_mm} mm`} /> : null}
-                    {g.column_fixity === "pinned" && <KV label="Base" value="Pinned (no moment)" />}
-                    <KV label="Projection a_x / a_y" value={`${g.projection_x_mm} / ${g.projection_y_mm} mm`} />
-                    <KV label="Eff. depth d_x / d_y" value={`${g.d_eff_x_mm} / ${g.d_eff_y_mm} mm`} />
-                    <KV label="Cover" value={`${g.cover_mm} mm`} />
-                  </div>
-                </div>
-              </Panel>
-
-              <Panel title="Bearing (Service) & Design Pressure (Ultimate)">
-                {r.sls_total_load_kN != null && (
-                  <KV label={r.sls_from_uls ? "ULS-derived load + footing + soil" : "Service load + footing + soil"}
-                    value={`${r.sls_total_load_kN} kN (W_f ${r.footing_weight_kN}, W_s ${r.soil_weight_kN ?? 0})`} />
-                )}
-                <KV label="Avg pressure q0 (SLS)" value={`${sp.q0} kN/m²`} />
-                <KV label="Max pressure qmax (SLS)" value={`${sp.qmax} kN/m²`} strong warn={!sp.bearing_ok} />
-                <KV label="Min pressure qmin (SLS)" value={`${sp.qmin} kN/m²`} warn={!sp.uplift_ok} />
-                <KV label="Allowable bearing" value={`${r.materials.allowable_bearing_kN_m2} kN/m²`} />
-                <KV label="Bearing utilisation" value={`${u.bearing_pct}%`} strong warn={u.bearing_pct > 100} />
-                {r.soil_pressure_uls && <KV label="Design pressure qmax (ULS)" value={`${r.soil_pressure_uls.qmax} kN/m²`} />}
-                <KV label="Design Mx / My" value={`${r.design_moments.Mx_kNm_per_m} / ${r.design_moments.My_kNm_per_m} kNm/m`} />
-              </Panel>
-            </div>
-
-            {/* design summary chips */}
-            <Panel title="Design Summary">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                <Chip label="Bearing (warning)" pct={u.bearing_pct} ok={sp.bearing_ok} />
-                <Chip label="One-way shear" ok={sx.status === "OK" && sy.status === "OK"} />
-                <Chip label="Punching" pct={u.punching_pct} ok={pn.status === "OK"} />
-                <Chip label="Reinforcement" ok={fx.status === "OK" && fy.status === "OK"} />
-                <Chip label="Uplift" ok={sp.uplift_ok} />
-                {r.detailing && <Chip label="Detailing" ok={r.detailing.status === "OK"} />}
-              </div>
-            </Panel>
-
-          </>
+          <FullDocument report={r.report} parts={[
+            { title: "Design Summary", node: overviewNode },
+            { title: "Bearing", node: bearingNode },
+            { title: "Flexural Design", node: flexuralNode },
+            { title: "Shear & Punching", node: shearNode },
+            { title: "Detailing & Schedule", node: r.detailing ? <DetailingTab det={r.detailing} report={r.report} /> : null },
+          ]} />
         )}
 
-        {tab === "Bearing" && (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Panel title="Soil Pressure Distribution (Service)">
-                <SoilPressure3D corners={sp.corners} g={g} allow={r.materials.allowable_bearing_kN_m2} />
-                <p className={`mt-2 text-xs ${SUB}`}>qmax {sp.qmax} / qmin {sp.qmin} kN/m². {sp.bearing_ok ? "Within allowable." : "Exceeds allowable bearing (warning only: not counted in the overall result)."}</p>
-              </Panel>
+        {tab === "Bearing" && bearingNode}
 
-              <Panel title="Plan">
-                <div className="flex justify-center"><PlanSVG g={g} /></div>
-                <p className={`mt-2 text-xs ${SUB}`}>Bearing is checked on the service loads plus the footing self-weight against the allowable bearing pressure; the column offset and moments tilt the pressure across the base.</p>
-              </Panel>
-            </div>
-            <ReportSections report={r.report} match={/Eccentricity|Soil Pressure/i} heading="Bearing and eccentricity — calculation" />
-          </>
-        )}
+        {tab === "Flexural Design" && flexuralNode}
 
-        {tab === "Flexural Design" && (
-          <>
-            {/* 3. reinforcement design */}
-            <Panel title="Reinforcement Design (Bottom, Both Directions)">
-              <Table
-                head={["Direction", "d (mm)", "As,req (mm²/m)", "As,min", "As,prov", "Bar / Spacing", "Status"]}
-                rows={[
-                  ["X", fx.d_eff_mm, fx.As_req, fx.As_min, fx.As_provided, `Y${fx.bar_dia}@${fx.spacing_mm}`, <Badge key="x" ok={fx.status === "OK"}>{fx.status}</Badge>],
-                  ["Y", fy.d_eff_mm, fy.As_req, fy.As_min, fy.As_provided, `Y${fy.bar_dia}@${fy.spacing_mm}`, <Badge key="y" ok={fy.status === "OK"}>{fy.status}</Badge>],
-                ]}
-              />
-            </Panel>
-
-              <Panel title="Reinforcement Layout (Bottom)">
-                <RebarLayout g={g} fx={fx} fy={fy} />
-                <p className={`mt-2 text-xs ${SUB}`}>Bottom mesh: X {`Y${fx.bar_dia}@${fx.spacing_mm}`}, Y {`Y${fy.bar_dia}@${fy.spacing_mm}`}. Cover {g.cover_mm} mm.</p>
-              </Panel>
-            <ReportSections report={r.report} match={/Design Moments|Flexural/i} heading="Bending design — calculation" />
-          </>
-        )}
-
-        {tab === "Shear & Punching" && (
-          <>
-            {/* 6. shear checks */}
-            <Panel title="Shear Checks">
-              <Table
-                head={["Check", "Direction", "VEd / vEd", "Resistance", "Status"]}
-                rows={[
-                  ["One-way shear", "X", `${sx.VEd_kN_per_m} kN/m`, `${sx.VRdc_kN_per_m} kN/m`, <Badge key="sx" ok={sx.status === "OK"}>{sx.status}</Badge>],
-                  ["One-way shear", "Y", `${sy.VEd_kN_per_m} kN/m`, `${sy.VRdc_kN_per_m} kN/m`, <Badge key="sy" ok={sy.status === "OK"}>{sy.status}</Badge>],
-                  pn.applicable === false
-                    ? ["Punching (6.4.4)", "—", "no perimeter fits", "one-way shear governs", <Badge key="pn" ok>N/A</Badge>]
-                    : ["Punching (6.4.4)", pn.a_mm != null ? `a = ${pn.a_mm} mm` : "—", `${pn.vEd_MPa} MPa`, `${pn.vRd_MPa ?? pn.vRdc_MPa} MPa`, <Badge key="pn" ok={pn.status === "OK"}>{pn.status}</Badge>],
-                  ...(pn.v0_MPa != null ? [["Punching, column face", "u0", `${pn.v0_MPa} MPa`, `${pn.vRdmax_MPa} MPa (max)`, <Badge key="p0" ok={pn.v0_MPa <= pn.vRdmax_MPa}>{pn.v0_MPa <= pn.vRdmax_MPa ? "OK" : "NOT OK"}</Badge>]] : []),
-                ]}
-              />
-              {(sx.rho_l != null) && (
-                <p className={`mt-2 text-xs ${SUB}`}>One-way shear at d from the column face with ρl from the bottom steel provided (X {sx.rho_l}, Y {sy.rho_l}). Punching per EC2 6.4.4(2): control perimeters searched at a ≤ 2d, relief from the soil pressure inside, vRd = vRd,c·2d/a{pn.beta != null ? `, β = ${pn.beta}` : ""}.</p>
-              )}
-            </Panel>
-
-            <ReportSections report={r.report} match={/One-Way Shear|Punching/i} heading="Shear and punching — calculation" />
-          </>
-        )}
+        {tab === "Shear & Punching" && shearNode}
 
         {tab === "Detailing & Schedule" && <DetailingTab det={r.detailing} report={r.report} />}
 
@@ -301,6 +319,25 @@ function SoilPressure3D({ corners, g, allow }) {
   );
 }
 
+/* top bar shared by the pad and combined views: breadcrumb, New / Open / Save */
+function FootingTopBar({ r, meta, navigate, setTab, setShowReport, type, input, name }) {
+  return (
+    <DesignTopBar element="foundation" className="mb-5"
+      crumbs={[
+        { label: "Foundation Design", to: "/foundation-input" },
+        { label: type, to: input },
+        { label: "Results" },
+      ]}
+      onNew={() => navigate(input)}
+      save={{
+        name, project: meta.project, status: r.status,
+        subtitle: [type, meta.concrete_grade, meta.steel_grade].filter(Boolean).join(" · "),
+      }}
+      onOpened={() => setTab("Overview")}
+      menu={[["Detailed report", () => setShowReport(true)]]} />
+  );
+}
+
 /* ---------- combined footing (two columns, one footing) ---------- */
 function CombinedFootingResults({ r, meta, navigate, sheetRef, showReport, setShowReport, tab, setTab }) {
   const pass = r.status === "PASS";
@@ -308,8 +345,98 @@ function CombinedFootingResults({ r, meta, navigate, sheetRef, showReport, setSh
   const lb = r.longitudinal_bottom, lt = r.longitudinal_top, tr = r.transverse, sh = r.shear, pn = r.punching, u = r.utilisation;
   const uls = r.soil_pressure_uls;
 
+  const overviewNode = (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Panel title="Columns & Resultant">
+                <KV label="Column 1 (left)" value={`${col.column_1.axial_load_kN} kN, at ${col.column_1.position_m} m`} />
+                <KV label="Column 2 (right)" value={`${col.column_2.axial_load_kN} kN, at ${col.column_2.position_m} m`} />
+                <KV label="Spacing" value={`${col.spacing_m} m`} />
+                <KV label="Total load W" value={`${col.total_load_kN} kN`} strong />
+                <KV label="Resultant location" value={`${col.resultant_position_m} m from left edge`} />
+                <KV label="Mx,total / My,total" value={`${r.moments.Mx_total_kNm} / ${r.moments.My_total_kNm} kNm`} />
+              </Panel>
+
+              <Panel title={r.auto_sized ? "Geometry (Sized on the load resultant) & Design Results" : "Geometry & Design Results"}>
+                <KV label="Footing" value={`${g.footing_length_mm} × ${g.footing_width_mm} mm`} />
+                {r.right_projection_m ? <KV label="Projection left / right (to column centre)" value={`${r.left_projection_m} / ${r.right_projection_m} m`} /> : null}
+                <KV label="Thickness" value={`${g.footing_depth_mm} mm`} />
+                <KV label="Effective depth, long. / trans." value={`${g.d_long_mm} / ${g.d_trans_mm} mm`} />
+                <KV label="Bearing qmax (SLS)" value={`${sp.qmax} kN/m²`} strong warn={!sp.bearing_ok} />
+                <KV label="Bearing qmin (SLS)" value={`${sp.qmin} kN/m²`} warn={!sp.uplift_ok} />
+                <KV label="Design pressure qmax (ULS net)" value={`${uls.qmax} kN/m²`} />
+                <KV label="Allowable bearing" value={`${r.materials.allowable_bearing_kN_m2} kN/m²`} />
+              </Panel>
+            </div>
+
+            <Panel title="Design Summary">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <Chip label="Bearing (warning)" pct={u.bearing_pct} ok={sp.bearing_ok} />
+                <Chip label="One-way shear" ok={sh.status === "OK"} />
+                <Chip label="Punching" pct={u.punching_pct} ok={pn.status === "OK"} />
+                <Chip label="Reinforcement" ok={lb.status === "OK" && lt.status === "OK" && tr.status === "OK"} />
+                <Chip label="Uplift" ok={sp.uplift_ok} />
+                {r.detailing && <Chip label="Detailing" ok={r.detailing.status === "OK"} />}
+              </div>
+            </Panel>
+
+          </>
+  );
+  const bearingNode = (
+          <>
+            <Panel title="Soil Pressure Distribution (SLS, incl. self-weight)">
+              <SoilPressure3D corners={sp.corners} g={g} allow={r.materials.allowable_bearing_kN_m2} />
+              <p className={`mt-2 text-xs ${SUB}`}>qmax {sp.qmax} / qmin {sp.qmin} kN/m². {sp.bearing_ok ? "Within allowable." : "Exceeds allowable bearing (warning only: not counted in the overall result)."}</p>
+            </Panel>
+
+            <ReportSections report={r.report} match={/Load Case|Resultant|Total Moments|Bearing|Projections/i} heading="Loads and bearing — calculation" />
+          </>
+  );
+  const flexuralNode = (
+          <>
+            <Panel title="Flexural Reinforcement">
+              <Table
+                head={["Direction", "M (kNm)", "d (mm)", "As,req", "As,min", "As,prov", "Bar / Spacing", "Status"]}
+                rows={[
+                  ["Longitudinal, bottom (sagging)", lb.Mmax_kNm, lb.d_eff_mm, lb.As_req, lb.As_min, lb.As_provided, `Y${lb.bar_dia}@${lb.spacing_mm}`, <Badge key="lb" ok={lb.status === "OK"}>{lb.status}</Badge>],
+                  ["Longitudinal, top (hogging)", Math.abs(lt.Mmax_kNm), lt.d_eff_mm, lt.As_req, lt.As_min, lt.As_provided, `Y${lt.bar_dia}@${lt.spacing_mm}`, <Badge key="lt" ok={lt.status === "OK"}>{lt.status}</Badge>],
+                  ["Transverse", tr.M_kNm, tr.d_eff_mm, tr.As_req, tr.As_min, tr.As_provided, `Y${tr.bar_dia}@${tr.spacing_mm}`, <Badge key="tr" ok={tr.status === "OK"}>{tr.status}</Badge>],
+                ]}
+              />
+              <p className={`mt-2 text-xs ${SUB}`}>
+                Steel areas in mm²/m. Longitudinal moments from a beam-on-soil analysis along the length: bottom steel for the
+                largest sagging moment (at {lb.location_m} m from the left edge, under the columns), top steel for the largest
+                hogging moment (at {lt.location_m} m, between the columns).
+              </p>
+            </Panel>
+
+            <ReportSections report={r.report} match={/Shear Force and Bending|Effective Depth|Reinforcement|Transverse Moment/i} heading="Bending design — calculation" />
+          </>
+  );
+  const shearNode = (
+          <>
+            <Panel title="Shear Checks">
+              <Table
+                head={["Check", "VEd / vEd", "Resistance", "Status"]}
+                rows={[
+                  ...sh.sections.map((x) => [`Shear ${x.label.replace("column ", "C").replace(" face", "")}, x ${x.x_m} m`, `${x.VEd_kN} kN`, `${x.VRdc_kN} kN`, <Badge key={x.label} ok={x.status === "OK"}>{x.status}</Badge>]),
+                  ...pn.columns.flatMap((c) => [
+                    [`Punching C${c.column}` + (c.applicable ? `, a ${c.a_mm} mm` : ""),
+                     c.applicable ? `${c.vEd_MPa} MPa` : "n/a", c.applicable ? `${c.vRd_MPa} MPa` : "off footing", <Badge key={`p${c.column}`} ok={c.status === "OK"}>{c.status}</Badge>],
+                    [`C${c.column} face, vRd,max`, `${c.v0_MPa} MPa`, `${c.vRdmax_MPa} MPa`, <Badge key={`f${c.column}`} ok={c.v0_MPa <= c.vRdmax_MPa}>{c.v0_MPa <= c.vRdmax_MPa ? "OK" : "NOT OK"}</Badge>],
+                  ]),
+                ]}
+              />
+              <p className={`mt-2 text-xs ${SUB}`}>One-way shear at d from each column face (EC2 6.2.1(8)). Punching per EC2 6.4.4 for each column; where no control perimeter fits on the footing, one-way shear across the full width governs.</p>
+            </Panel>
+            <ReportSections report={r.report} match={/One-Way Shear|Punching/i} heading="Shear and punching — calculation" />
+          </>
+  );
   return (
     <div className="min-h-screen bg-[#f3f4f6] dark:bg-[#111827] px-4 sm:px-6 2xl:px-10 py-6">
+      <FootingTopBar r={r} meta={meta} navigate={navigate} setTab={setTab} setShowReport={setShowReport}
+        type="Combined Footing" input="/foundation-input?type=combined"
+        name={`Combined footing ${g.footing_length_mm} × ${g.footing_width_mm} × ${g.footing_depth_mm} mm`} />
       <div ref={sheetRef} className="w-full space-y-5">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <button onClick={() => navigate("/foundation-input")} className={`flex items-center gap-2 text-sm ${SUB}`}>
@@ -364,95 +491,20 @@ function CombinedFootingResults({ r, meta, navigate, sheetRef, showReport, setSh
         <TabBar tabs={PAD_TABS} tab={tab} setTab={setTab} />
 
         {tab === "Overview" && (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Panel title="Columns & Resultant">
-                <KV label="Column 1 (left)" value={`${col.column_1.axial_load_kN} kN, at ${col.column_1.position_m} m`} />
-                <KV label="Column 2 (right)" value={`${col.column_2.axial_load_kN} kN, at ${col.column_2.position_m} m`} />
-                <KV label="Spacing" value={`${col.spacing_m} m`} />
-                <KV label="Total load W" value={`${col.total_load_kN} kN`} strong />
-                <KV label="Resultant location" value={`${col.resultant_position_m} m from left edge`} />
-                <KV label="Mx,total / My,total" value={`${r.moments.Mx_total_kNm} / ${r.moments.My_total_kNm} kNm`} />
-              </Panel>
-
-              <Panel title={r.auto_sized ? "Geometry (Sized on the load resultant) & Design Results" : "Geometry & Design Results"}>
-                <KV label="Footing" value={`${g.footing_length_mm} × ${g.footing_width_mm} mm`} />
-                {r.right_projection_m ? <KV label="Projection left / right (to column centre)" value={`${r.left_projection_m} / ${r.right_projection_m} m`} /> : null}
-                <KV label="Thickness" value={`${g.footing_depth_mm} mm`} />
-                <KV label="Effective depth, long. / trans." value={`${g.d_long_mm} / ${g.d_trans_mm} mm`} />
-                <KV label="Bearing qmax (SLS)" value={`${sp.qmax} kN/m²`} strong warn={!sp.bearing_ok} />
-                <KV label="Bearing qmin (SLS)" value={`${sp.qmin} kN/m²`} warn={!sp.uplift_ok} />
-                <KV label="Design pressure qmax (ULS net)" value={`${uls.qmax} kN/m²`} />
-                <KV label="Allowable bearing" value={`${r.materials.allowable_bearing_kN_m2} kN/m²`} />
-              </Panel>
-            </div>
-
-            <Panel title="Design Summary">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                <Chip label="Bearing (warning)" pct={u.bearing_pct} ok={sp.bearing_ok} />
-                <Chip label="One-way shear" ok={sh.status === "OK"} />
-                <Chip label="Punching" pct={u.punching_pct} ok={pn.status === "OK"} />
-                <Chip label="Reinforcement" ok={lb.status === "OK" && lt.status === "OK" && tr.status === "OK"} />
-                <Chip label="Uplift" ok={sp.uplift_ok} />
-                {r.detailing && <Chip label="Detailing" ok={r.detailing.status === "OK"} />}
-              </div>
-            </Panel>
-
-          </>
+          <FullDocument report={r.report} parts={[
+            { title: "Design Summary", node: overviewNode },
+            { title: "Bearing", node: bearingNode },
+            { title: "Flexural Design", node: flexuralNode },
+            { title: "Shear & Punching", node: shearNode },
+            { title: "Detailing & Schedule", node: r.detailing ? <DetailingTab det={r.detailing} report={r.report} /> : null },
+          ]} />
         )}
 
-        {tab === "Bearing" && (
-          <>
-            <Panel title="Soil Pressure Distribution (SLS, incl. self-weight)">
-              <SoilPressure3D corners={sp.corners} g={g} allow={r.materials.allowable_bearing_kN_m2} />
-              <p className={`mt-2 text-xs ${SUB}`}>qmax {sp.qmax} / qmin {sp.qmin} kN/m². {sp.bearing_ok ? "Within allowable." : "Exceeds allowable bearing (warning only: not counted in the overall result)."}</p>
-            </Panel>
+        {tab === "Bearing" && bearingNode}
 
-            <ReportSections report={r.report} match={/Load Case|Resultant|Total Moments|Bearing|Projections/i} heading="Loads and bearing — calculation" />
-          </>
-        )}
+        {tab === "Flexural Design" && flexuralNode}
 
-        {tab === "Flexural Design" && (
-          <>
-            <Panel title="Flexural Reinforcement">
-              <Table
-                head={["Direction", "M (kNm)", "d (mm)", "As,req", "As,min", "As,prov", "Bar / Spacing", "Status"]}
-                rows={[
-                  ["Longitudinal, bottom (sagging)", lb.Mmax_kNm, lb.d_eff_mm, lb.As_req, lb.As_min, lb.As_provided, `Y${lb.bar_dia}@${lb.spacing_mm}`, <Badge key="lb" ok={lb.status === "OK"}>{lb.status}</Badge>],
-                  ["Longitudinal, top (hogging)", Math.abs(lt.Mmax_kNm), lt.d_eff_mm, lt.As_req, lt.As_min, lt.As_provided, `Y${lt.bar_dia}@${lt.spacing_mm}`, <Badge key="lt" ok={lt.status === "OK"}>{lt.status}</Badge>],
-                  ["Transverse", tr.M_kNm, tr.d_eff_mm, tr.As_req, tr.As_min, tr.As_provided, `Y${tr.bar_dia}@${tr.spacing_mm}`, <Badge key="tr" ok={tr.status === "OK"}>{tr.status}</Badge>],
-                ]}
-              />
-              <p className={`mt-2 text-xs ${SUB}`}>
-                Steel areas in mm²/m. Longitudinal moments from a beam-on-soil analysis along the length: bottom steel for the
-                largest sagging moment (at {lb.location_m} m from the left edge, under the columns), top steel for the largest
-                hogging moment (at {lt.location_m} m, between the columns).
-              </p>
-            </Panel>
-
-            <ReportSections report={r.report} match={/Shear Force and Bending|Effective Depth|Reinforcement|Transverse Moment/i} heading="Bending design — calculation" />
-          </>
-        )}
-
-        {tab === "Shear & Punching" && (
-          <>
-            <Panel title="Shear Checks">
-              <Table
-                head={["Check", "VEd / vEd", "Resistance", "Status"]}
-                rows={[
-                  ...sh.sections.map((x) => [`Shear ${x.label.replace("column ", "C").replace(" face", "")}, x ${x.x_m} m`, `${x.VEd_kN} kN`, `${x.VRdc_kN} kN`, <Badge key={x.label} ok={x.status === "OK"}>{x.status}</Badge>]),
-                  ...pn.columns.flatMap((c) => [
-                    [`Punching C${c.column}` + (c.applicable ? `, a ${c.a_mm} mm` : ""),
-                     c.applicable ? `${c.vEd_MPa} MPa` : "n/a", c.applicable ? `${c.vRd_MPa} MPa` : "off footing", <Badge key={`p${c.column}`} ok={c.status === "OK"}>{c.status}</Badge>],
-                    [`C${c.column} face, vRd,max`, `${c.v0_MPa} MPa`, `${c.vRdmax_MPa} MPa`, <Badge key={`f${c.column}`} ok={c.v0_MPa <= c.vRdmax_MPa}>{c.v0_MPa <= c.vRdmax_MPa ? "OK" : "NOT OK"}</Badge>],
-                  ]),
-                ]}
-              />
-              <p className={`mt-2 text-xs ${SUB}`}>One-way shear at d from each column face (EC2 6.2.1(8)). Punching per EC2 6.4.4 for each column; where no control perimeter fits on the footing, one-way shear across the full width governs.</p>
-            </Panel>
-            <ReportSections report={r.report} match={/One-Way Shear|Punching/i} heading="Shear and punching — calculation" />
-          </>
-        )}
+        {tab === "Shear & Punching" && shearNode}
 
         {tab === "Detailing & Schedule" && <DetailingTab det={r.detailing} report={r.report} />}
 
@@ -543,7 +595,7 @@ function ReportModal({ r, onClose, title }) {
 function Panel({ title, children }) {
   return (
     <div className={CARD}>
-      <div className="border-b border-[#e2e8f0] dark:border-[#334155] px-5 py-3"><h3 className={TITLE}>{title}</h3></div>
+      <div className="border-b border-[#e2e8f0] dark:border-[#334155] px-5 py-3"><h3 className={`doc-h ${TITLE}`}>{title}</h3></div>
       <div className="p-5">{children}</div>
     </div>
   );
@@ -605,24 +657,39 @@ function Chip({ label, pct, ok }) {
 
 /* ---------- detailing & bar schedule (Structville 9.10, 10.2) ---------- */
 function BarShape({ code, dims }) {
-  // shape 21: U-bar (A leg, B straight, C leg); 11: L-bar (A vertical, B foot)
+  // shape 21: U-bar (A leg, B straight, C leg); 11: L-bar (A vertical, B foot);
+  // 51: closed link (A x B, C hooks). Drawn large enough to read in the PDF.
   const stroke = "currentColor";
-  const lab = { fontSize: 9, fill: "#64748b" };
+  const lab = { fontSize: 12, fill: "#475569" };
+  const cls = "text-[#c0392b] dark:text-[#f87171]";
   if (code === "21") {
     return (
-      <svg width="150" height="40" viewBox="0 0 150 40" className="text-[#c0392b] dark:text-[#f87171]">
-        <polyline points="30,4 30,24 120,24 120,4" fill="none" stroke={stroke} strokeWidth="2.5" />
-        <text x="26" y="17" textAnchor="end" {...lab}>{dims.A}</text>
-        <text x="75" y="37" textAnchor="middle" {...lab}>{dims.B}</text>
-        <text x="124" y="17" {...lab}>{dims.C}</text>
+      <svg width="230" height="70" viewBox="0 0 230 70" className={cls}>
+        <polyline points="44,8 44,42 186,42 186,8" fill="none" stroke={stroke} strokeWidth="3" strokeLinejoin="round" />
+        <text x="38" y="30" textAnchor="end" {...lab}>{dims.A}</text>
+        <text x="115" y="60" textAnchor="middle" {...lab}>{dims.B}</text>
+        <text x="192" y="30" {...lab}>{dims.C}</text>
+      </svg>
+    );
+  }
+  if (code === "51") {
+    return (
+      <svg width="230" height="84" viewBox="0 0 230 84" className={cls}>
+        <rect x="80" y="10" width="62" height="54" rx="5" fill="none" stroke={stroke} strokeWidth="3" />
+        <polyline points="124,10 142,10 142,28" fill="none" stroke={stroke} strokeWidth="3" />
+        <line x1="128" y1="12" x2="114" y2="26" stroke={stroke} strokeWidth="3" strokeLinecap="round" />
+        <line x1="140" y1="24" x2="126" y2="38" stroke={stroke} strokeWidth="3" strokeLinecap="round" />
+        <text x="111" y="79" textAnchor="middle" {...lab}>{dims.A}</text>
+        <text x="74" y="41" textAnchor="end" {...lab}>{dims.B}</text>
+        <text x="150" y="41" {...lab}>hooks {dims.C}</text>
       </svg>
     );
   }
   return (
-    <svg width="150" height="40" viewBox="0 0 150 40" className="text-[#c0392b] dark:text-[#f87171]">
-      <polyline points="34,4 34,24 94,24" fill="none" stroke={stroke} strokeWidth="2.5" />
-      <text x="30" y="17" textAnchor="end" {...lab}>{dims.A}</text>
-      <text x="64" y="37" textAnchor="middle" {...lab}>{dims.B}</text>
+    <svg width="230" height="70" viewBox="0 0 230 70" className={cls}>
+      <polyline points="60,6 60,42 150,42" fill="none" stroke={stroke} strokeWidth="3" strokeLinejoin="round" />
+      <text x="54" y="28" textAnchor="end" {...lab}>{dims.A}</text>
+      <text x="105" y="60" textAnchor="middle" {...lab}>{dims.B}</text>
     </svg>
   );
 }
@@ -648,9 +715,15 @@ function DetailingTab({ det, report }) {
         </p>
       </Panel>
 
+      <Panel title="Reinforcement Drawing">
+        <FootingDetailDrawing det={det} />
+      </Panel>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <Panel title="Bar Callouts (Drawing)">
           {det.callouts.map((c, i) => <KV key={i} label={det.element === "pad" ? (i === 0 ? "Along L" : "Along B") : ["Bottom, longitudinal", "Top, longitudinal", "Bottom, transverse", "Top, transverse"][i]} value={c} strong />)}
+          {det.starters && <KV label="Starter bars" value={`${det.starters.per_column * det.starters.columns}-Y${det.starters.phi_mm}-${det.starters.mark || ""}`} strong />}
+          {det.links && <KV label="Links to starters (per column)" value={det.links.callout} strong />}
           <p className={`mt-2 text-xs ${SUB}`}>number - size - bar mark - spacing (mm).</p>
         </Panel>
         <Panel title="Starter Bars">
@@ -660,6 +733,9 @@ function DetailingTab({ det, report }) {
               <KV label="Lap length l0 (EC2 8.7.3)" value={`${det.starters.lap_mm} mm`} />
               <KV label="Projection above footing" value={`${det.starters.projection_mm} mm (${det.starters.projection_from})`} />
               <KV label="Foot on bottom mat" value="300 mm" />
+              {det.links
+                ? <KV label="Links over the column stub" value={`${det.links.per_column} Y${det.links.phi_mm} @ ${det.links.spacing_mm} per column, ${det.links.a_mm} × ${det.links.b_mm} mm (stub ${det.links.stub_mm} mm)`} />
+                : <KV label="Links over the column stub" value="not scheduled (circular column): see the column design" />}
             </>
           ) : <p className={`text-sm ${SUB}`}>No starter bars scheduled (count set to 0).</p>}
         </Panel>
@@ -667,16 +743,16 @@ function DetailingTab({ det, report }) {
 
       <Panel title="Reinforcement Bending / Quantity Schedule">
         <Table
-          head={["S/No", "Bar mark", "Type & size", "No. of bars", "No. of members", "Shape", "Shape code", "Length (m)", "Total length (m)", ...dias.map((d) => `${d} (kg)`)]}
+          head={["S/No", "Mark", "Location", "Size", "No.", "Members", "Shape (mm)", "Code", "Length (m)", "Total (m)", ...dias.map((d) => `${d} (kg)`)]}
           rows={[
             ...det.schedule.map((b, i) => [
-              i + 1, b.mark, b.type_size, b.n_bars, b.n_members, <BarShape key={b.mark} code={b.shape_code} dims={b.dims_mm} />,
+              i + 1, b.mark, <span key="loc" className="inline-block w-28 whitespace-normal font-sans text-xs leading-snug">{b.description}</span>, b.type_size, b.n_bars, b.n_members, <BarShape key={b.mark} code={b.shape_code} dims={b.dims_mm} />,
               b.shape_code, b.length_m.toFixed(3), b.total_length_m.toFixed(2),
               ...dias.map((d) => (d === b.type_size ? b.mass_kg.toFixed(2) : "")),
             ]),
-            ["", "", "", "", "", "", "", "", "TOTAL (kg)", ...det.summary.by_diameter.map((e) => e.mass_kg.toFixed(2))],
-            ["", "", "", "", "", "", "", "", "TOTAL (tonnes)", ...det.summary.by_diameter.map((e) => e.tonnes.toFixed(4))],
-            ["", "", "", "", "", "", "", "", "Pieces (12 m)", ...det.summary.by_diameter.map((e) => `${e.pieces_12m} pcs`)],
+            ["", "", "", "", "", "", "", "", "", "TOTAL (kg)", ...det.summary.by_diameter.map((e) => e.mass_kg.toFixed(2))],
+            ["", "", "", "", "", "", "", "", "", "TOTAL (tonnes)", ...det.summary.by_diameter.map((e) => e.tonnes.toFixed(4))],
+            ["", "", "", "", "", "", "", "", "", "Pieces (12 m)", ...det.summary.by_diameter.map((e) => `${e.pieces_12m} pcs`)],
           ]}
         />
         <p className={`mt-2 text-xs ${SUB}`}>

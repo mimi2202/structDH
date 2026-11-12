@@ -1,4 +1,5 @@
 // src/components/project/ProjectTeamTab.jsx
+import Dropdown from '../Dropdown'
 import React, { useState, useEffect, useRef } from 'react'
 import {
   FiUsers,
@@ -490,17 +491,12 @@ const ProjectTeamTab = ({ projectId }) => {
                 <label className="block text-sm font-medium text-[#374151] dark:text-[#d1d5db] mb-2">
                   Role
                 </label>
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0A2F44]"
-                >
-                  <option value={ROLES.PROJECT_ADMIN}>
-                    Admin - Can manage members and settings
-                  </option>
-                  <option value={ROLES.PROJECT_EDITOR}>Editor - Can create and edit designs</option>
-                  <option value={ROLES.PROJECT_VIEWER}>Viewer - Read-only access</option>
-                </select>
+                <Dropdown value={inviteRole} onChange={(v) => setInviteRole(v)} className="py-3"
+                  options={[
+                    { value: ROLES.PROJECT_ADMIN, label: "Admin - Can manage members and settings" },
+                    { value: ROLES.PROJECT_EDITOR, label: "Editor - Can create and edit designs" },
+                    { value: ROLES.PROJECT_VIEWER, label: "Viewer - Read-only access" },
+                  ]} />
               </div>
             </div>
             <div className="flex justify-end space-x-3 mt-6">
