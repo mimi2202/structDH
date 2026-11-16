@@ -95,7 +95,7 @@ AUTOSIZE_CANDIDATES: List[Tuple[int, int]] = [
 AVAILABLE_LINK_DIAS = [6, 8, 10, 12]
 
 # Printed on the report so a submission can name the software it came from.
-PRODUCT_NAME = "SDH (Structural Design Hub)"
+PRODUCT_NAME = "SDH (Sphere Design Hub)"
 REPORT_TITLE = "Structural Engineering Calculation Report"
 CALC_ID_PREFIX = "SDH"
 # Bump when the calculation logic changes. There is no release process behind

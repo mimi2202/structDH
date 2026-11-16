@@ -1,10 +1,9 @@
 // src/pages/Materials.jsx — material data the designs use (renders inside
 // MainLayout). Concrete and steel properties are the EC2 formulas the engines
 // apply; the cover and fire tables are copies of the backend tables (keep in
-// step); cost rates are read live from backend/engine/rates_db.json.
-import React, { useEffect, useState } from "react";
+// step).
+import React from "react";
 import { Link } from "react-router-dom";
-import { slabAPI } from "../services/api";
 
 const CARD = "bg-white dark:bg-[#1f2937] rounded-xl border border-[#e2e8f0] dark:border-[#334155] shadow-sm";
 const MAIN = "text-[#0F172A] dark:text-white";
@@ -53,51 +52,6 @@ function Table({ head, rows, mono = [] }) {
         </tbody>
       </table>
     </div>
-  );
-}
-
-function Rates() {
-  const [state, setState] = useState({ loading: true });
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        const { regions = [], version } = await slabAPI.getRegions();
-        const data = await Promise.all(regions.map((r) => slabAPI.getRates(r)));
-        if (live) setState({ version, data });
-      } catch (e) {
-        if (live) setState({ error: e.message === "Failed to fetch" ? "The design server is not reachable." : e.message });
-      }
-    })();
-    return () => { live = false; };
-  }, []);
-
-  if (state.loading) return <p className={`mt-3 text-sm ${SUB}`}>Loading rates…</p>;
-  if (state.error) return <p className="mt-3 text-sm text-red-600 dark:text-red-400">Could not load the cost rates: {state.error}</p>;
-  const fmt = (v, cur) => (v == null ? "—" : `${cur} ${Number(v).toLocaleString()}`);
-  return (
-    <>
-      <div className="mt-3 grid grid-cols-1 gap-5 md:grid-cols-2">
-        {state.data.map(({ region, rates }) => {
-          const m = rates.materials || {}, cur = rates.currency || "";
-          return (
-            <div key={region}>
-              <div className={`mb-1 text-sm font-semibold ${MAIN}`}>{region} <span className={`font-normal ${SUB}`}>({cur})</span></div>
-              <Table head={["Item", "Rate"]} mono={[1]} rows={[
-                ...Object.entries(m.concrete || {}).map(([g, v]) => [`Concrete ${g} (per m³)`, fmt(v, cur)]),
-                ...Object.entries(m.reinforcement || m.steel || {}).map(([g, v]) => [`Reinforcement ${g} (per tonne)`, fmt(v, cur)]),
-                ...Object.entries(m.formwork || {}).map(([g, v]) => [`Formwork, ${g.replace(/_/g, " ")} (per m²)`, fmt(v, cur)]),
-              ]} />
-            </div>
-          );
-        })}
-      </div>
-      <p className={`mt-3 text-xs ${SUB}`}>
-        Rate table {state.version || ""}. Used for the slab and continuous slab cost breakdown (Region on the page); the design itself does not depend on it.
-        A grade with no rate listed here is priced at a fixed fallback (105,000 per m³ of concrete, 950,000 per tonne of steel) in the region's currency,
-        so add a rate for every grade you use. To change the rates, edit backend/engine/rates_db.json.
-      </p>
-    </>
   );
 }
 
@@ -173,11 +127,6 @@ export default function Materials() {
           <p className={`mt-2 text-xs ${SUB}`}>Checked by the continuous slab only, with a = c<sub>nom</sub> + φ/2.</p>
         </section>
       </div>
-
-      <section className={`${CARD} p-5`}>
-        <h2 className={TITLE}>Cost rates</h2>
-        <Rates />
-      </section>
     </div>
   );
 }

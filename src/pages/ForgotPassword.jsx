@@ -83,7 +83,7 @@ const ForgotPassword = () => {
             className="w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4"
             style={{ backgroundColor: '#0A2F44' }}
           >
-            <span className="text-white text-2xl font-bold">SA</span>
+            <span className="text-white text-2xl font-bold">SDH</span>
           </div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
             Reset your password

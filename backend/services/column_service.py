@@ -159,5 +159,28 @@ def design_column(req: ColumnDesignRequest) -> ColumnDesignResult:
                    if sec["title"].startswith("6.")), len(raw["report"]))
         raw["report"].insert(at, {"title": "6b. DESIGN MOMENTS FROM SUB-FRAME",
                                   "rows": subframe_rows})
+    _attach_bar_detailing(raw)
     return ColumnDesignResult.model_validate(raw)
+
+
+def _attach_bar_detailing(raw: dict) -> None:
+    """Bar marks, schedule and drawing data per storey (engine/member_detailing.py);
+    a report section is appended."""
+    from engine.member_detailing import column_detailing
+    s = raw["summary"]
+    levels = []
+    for lv in raw["levels"]:
+        d = lv.get("detailing") or {}
+        levels.append({
+            "level": lv["level"], "b": lv["b_mm"], "h": lv["h_mm"], "cover": lv.get("cover_mm", s["cover_mm"]),
+            "n_bars": int(lv["n_bars"]), "phi": float(lv["bar_dia_mm"]),
+            "n_b_face": int(d.get("n_bars_b_face", 2)), "n_h_face": int(d.get("n_bars_h_face", 2)),
+            "link_phi": float(lv.get("link_dia_mm", s["link_dia_mm"])),
+            "s_max": float(d.get("s_max_mm", 200)), "s_red": float(d.get("s_reduced_mm", 120)),
+        })
+    det = column_detailing(levels=levels, storey_height_mm=s["storey_height_m"] * 1000,
+                           fck=raw["materials"]["fck"], fyk=raw["materials"]["fyk"])
+    raw["report"].append({"title": "Detailing and Bar Schedule",
+                          "rows": [{"reference": x["ref"], "calculation": x["calc"], "output": x["out"]} for x in det.pop("report_rows")]})
+    raw["bar_detailing"] = det
 calculate_column_design = design_column

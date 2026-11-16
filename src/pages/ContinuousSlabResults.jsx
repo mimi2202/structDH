@@ -1,5 +1,6 @@
 // src/pages/ContinuousSlabResults.jsx — renders inside MainLayout
 import React, { useRef, useState } from "react";
+import { guardNavigation } from "../utils/unsavedGuard";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   FiArrowLeft, FiAlertTriangle, FiCheckCircle, FiXCircle, FiFileText,
@@ -9,6 +10,8 @@ import DetailedReport from "../components/DetailedReport";
 import ReportSections from "../components/ReportSections";
 import { exportElementToPdf } from "../utils/exportPdf";
 import FullDocument from "../components/results/FullDocument";
+import DetailingSchedule from "../components/results/DetailingSchedule";
+import MemberDetailDrawing from "../components/results/MemberDetailDrawing";
 import { DIAGRAM } from "../components/results/diagramTheme";
 import { buildCoverHtml } from "../utils/reportCover";
 import DesignTopBar from "../components/results/DesignTopBar";
@@ -23,12 +26,13 @@ const SHR = DIAGRAM.shear;
 
 // Overview, then one tab per check in depth; "Download" prints the tab on
 // screen behind a cover page.
-const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection & Durability"];
+const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection & Durability", "Detailing & Schedule"];
 const TAB_NOTES = {
   "Overview": "the complete design document: summary, flexural, shear, deflection and durability sections in full, and the full calculation report, numbered.",
   "Flexural Design": "loads, pattern loading and the continuous analysis, then the span (sagging) and support (hogging) reinforcement.",
   "Shear Design": "design shear at each support, reduced to d from the face, against the resistance without shear reinforcement (EC2 6.2.2).",
   "Deflection & Durability": "span/depth deflection check (EC2 7.4.2), cover for exposure, fire resistance and crack control.",
+  "Detailing & Schedule": "the reinforcement drawing, bar marks and callouts, anchorage at simple supports and the bending / quantity schedule.",
 };
 
 export default function ContinuousSlabResults() {
@@ -46,13 +50,13 @@ export default function ContinuousSlabResults() {
           <FiAlertTriangle className="mx-auto mb-4 text-6xl text-yellow-500" />
           <h2 className={`mb-2 text-xl font-bold ${MAIN}`}>No continuous slab results</h2>
           <p className={`mb-6 ${SUB}`}>Run a continuous slab design first.</p>
-          <button onClick={() => navigate("/continuous-slab")} className="rounded-lg bg-[#0A2F44] px-6 py-2 text-white hover:bg-[#082636]">Back to Input</button>
+          <button onClick={() => guardNavigation(() => navigate("/continuous-slab"))} className="rounded-lg bg-[#0A2F44] px-6 py-2 text-white hover:bg-[#082636]">Back to Input</button>
         </div>
       </div>
     );
   }
 
-  const { summary, envelope, spans, supports, deflection, shear, compliance, cost_breakdown, report } = data;
+  const { summary, envelope, spans, supports, deflection, shear, compliance, report } = data;
   const pass = summary.status === "PASS";
   // The backend already returns per-check PASS/FAIL status in `compliance`
   // (span flexures, support flexures, deflection, shear) -- use it to name
@@ -119,16 +123,6 @@ export default function ContinuousSlabResults() {
             ["Eff. depth d", `${summary.effective_depth} mm`],
             ["Governing bars", `T${summary.selected_bar_diameter}@${summary.selected_spacing}`],
             ["Utilisation", `${summary.utilization_ratio}`],
-          ]} />
-        </Card>
-
-        <Card n="7" title="Cost Estimate">
-          <KV rows={[
-            ["Concrete", `${cost_breakdown.concrete.cost}`],
-            ["Steel", `${cost_breakdown.steel.cost}`],
-            ["Formwork", `${cost_breakdown.formwork.cost}`],
-            ["Total (1 m strip)", `${cost_breakdown.total}`],
-            ["Per m run", `${cost_breakdown.total_per_sqm}`],
           ]} />
         </Card>
       </div>
@@ -201,7 +195,7 @@ export default function ContinuousSlabResults() {
             {pass ? <FiCheckCircle /> : <FiXCircle />} {pass ? "SAFE" : "CHECK"}
           </span>
           <button onClick={() => setReportOpen(true)} className="flex items-center gap-2 rounded-lg border border-[#0A2F44] px-3 py-1.5 text-sm font-medium text-[#0A2F44] hover:bg-[#e6f0f5] dark:border-[#66a4c2] dark:text-[#66a4c2] dark:hover:bg-[#1e3a4a]"><FiFileText size={15} /> Detailed Report</button>
-          <button onClick={download} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#082636]"><FiDownload size={15} /> Download</button>
+          <button data-pdf-download data-shortcut="pdf" onClick={download} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#082636]"><FiDownload size={15} /> Download</button>
         </div>
       </div>
 
@@ -251,6 +245,7 @@ export default function ContinuousSlabResults() {
           { title: "Flexural Design", node: flexuralNode },
           { title: "Shear Design", node: shearNode },
           { title: "Deflection & Durability", node: deflectionNode },
+          ...(data.detailing ? [{ title: "Detailing & Schedule", node: <DetailingSchedule det={data.detailing} report={report} drawing={<MemberDetailDrawing det={data.detailing} />} /> }] : []),
         ]} />
       )}
 
@@ -259,9 +254,10 @@ export default function ContinuousSlabResults() {
       {tab === "Shear Design" && shearNode}
 
       {tab === "Deflection & Durability" && deflectionNode}
+      {tab === "Detailing & Schedule" && <DetailingSchedule det={data.detailing} report={report} drawing={data.detailing && <MemberDetailDrawing det={data.detailing} />} />}
 
       <div className="cb-no-print mt-6 flex items-center justify-between border-t border-[#e2e8f0] pt-4 dark:border-[#334155]">
-        <button onClick={() => navigate("/continuous-slab")} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}><FiArrowLeft size={15} /> Back to Input</button>
+        <button onClick={() => guardNavigation(() => navigate("/continuous-slab"))} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}><FiArrowLeft size={15} /> Back to Input</button>
       </div>
 
       {reportOpen && (

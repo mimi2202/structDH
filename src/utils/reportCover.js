@@ -11,7 +11,7 @@
 
 import { getSettings } from "./appSettings";
 
-const PRODUCT = "SDH (Structural Design Hub)";
+const PRODUCT = "SDH (Sphere Design Hub)";
 
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => (
   { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -107,3 +107,16 @@ export function buildCoverHtml(opts) {
   above is responsible for verifying them and for the design. The full calculation trace is in the Detailed Report.</p>
 </div>`;
 }
+
+// Who and which run, as printed on the cover: for registers and packages.
+export function reportPeople(report) {
+  const rows = reportRows(report);
+  return {
+    designer: person(field(rows, "Designer")),
+    checker: person(field(rows, "Checked by")),
+    calcId: field(rows, "Calculation ID"),
+    generated: field(rows, "Generated"),
+  };
+}
+
+export { PRODUCT };

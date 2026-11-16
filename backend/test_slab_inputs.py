@@ -38,7 +38,7 @@ BASE = {
         "crack_width_limit": 0.3, "deflection_limit": 250,
     },
     "bar_diameters": [12, 16, 20],
-    "use_ai": False, "region": "Nigeria", "building_use": "office",
+    "use_ai": False, "region": "UK", "building_use": "office",
 }
 
 

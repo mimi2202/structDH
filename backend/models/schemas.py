@@ -111,6 +111,9 @@ class SlabDesignRequest(BaseModel):
     use_ai: bool = Field(False, description="Enable AI recommendation")
     region: str = Field("UK", description="Region for cost rates")
     building_use: str = Field("office", description="Occupancy for two-way EC2 engine presets / auto-loads")
+    # detailing / bar schedule (engine/member_detailing.py)
+    support_width_mm: float = Field(230, gt=0, le=2000)
+    n_members: int = Field(1, ge=1, le=500)
     design_basis: SlabDesignBasis = SlabDesignBasis()
 
     @model_validator(mode="after")
@@ -266,6 +269,7 @@ class SlabDesignResult(BaseModel):
     optimization_options: List[OptimizationOption]
     report: List[ReportSection] = []
     bar_selection: Optional[Dict] = None   # set when auto_bars was on
+    detailing: Optional[Dict] = None       # engine/member_detailing.py
     load_combination: Optional[Dict] = None   # EN 1990 6.10: leading / accompanying actions
     two_way: Optional[Dict] = None   # two-way only: coefficients, the 4 moments, steel per location, edge continuity
 
@@ -299,6 +303,10 @@ class ContinuousSlabRequest(BaseModel):
     region: str = Field("UK")
     occupancy: Optional[str] = None   # sets psi_2 for the crack check; None = not stated (psi_2 = 0.6 assumed)
     design_basis: SlabDesignBasis = SlabDesignBasis()
+    # detailing / bar schedule (engine/member_detailing.py)
+    slab_width_mm: float = Field(1000, gt=0, le=100000, description="slab width across the spans; 1000 = per metre strip")
+    support_width_mm: float = Field(230, gt=0, le=2000)
+    n_members: int = Field(1, ge=1, le=500)
 
     @model_validator(mode="after")
     def check_spans(self):
@@ -379,3 +387,4 @@ class ContinuousSlabResult(BaseModel):
     diagram: DiagramOut
     report: List[ReportSection] = []
     bar_selection: Optional[Dict] = None   # set when auto_bars was on
+    detailing: Optional[Dict] = None       # engine/member_detailing.py

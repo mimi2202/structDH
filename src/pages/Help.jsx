@@ -5,6 +5,9 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { FiChevronDown, FiSearch, FiCheckCircle, FiAlertTriangle } from "react-icons/fi";
+import { SHORTCUTS } from "../utils/shortcuts";
+import { ShortcutKeys } from "../components/ShortcutLayer";
+import { ELEMENTS } from "../content/elements";
 
 const CARD = "bg-white dark:bg-[#1f2937] rounded-xl border border-[#e2e8f0] dark:border-[#334155] shadow-sm";
 const MAIN = "text-[#0F172A] dark:text-white";
@@ -13,116 +16,6 @@ const TITLE = "text-[13px] font-bold uppercase tracking-wide text-[#0A2F44] dark
 const LINK = "font-medium text-[#0A2F44] hover:underline dark:text-[#66a4c2]";
 
 const VERSION = "1.0.0";
-
-/* ---- what each element does: checks made, and what is left to the engineer ---- */
-const ELEMENTS = [
-  {
-    name: "Slab: one-way and two-way", to: "/structural-input",
-    checks: [
-      "Design load from EN 1990 Eq. 6.10 with imposed load and downward wind; the leading action can be chosen or left on Auto (the larger case is used).",
-      "Bending: required steel, minimum steel and the bars provided (EC2 6.1, 9.2.1.1). Two-way slabs use moment coefficients and design four locations: short and long span, midspan and continuous edges.",
-      "Shear without shear reinforcement (EC2 6.2.2).",
-      "Deflection by span / effective depth (EC2 7.4.2, Eq. 7.16).",
-    ],
-    limits: [
-      "Wind uplift (suction) is not checked: wind is a downward pressure only.",
-      "Cover is not checked against the exposure class on the one-way slab (the two-way slab checks it only when no cover is entered).",
-      "No fire or crack-width check on these two; the continuous slab has both.",
-    ],
-  },
-  {
-    name: "Continuous one-way slab", to: "/continuous-slab",
-    checks: [
-      "Pattern loading: loaded spans carry the full design load, unloaded spans 1.35 Gk (EC2 5.1.3). Moments and shears are enveloped separately.",
-      "Bending at every span and support, shear at each support (EC2 6.1, 6.2.2).",
-      "Deflection by span / effective depth (EC2 7.4.2).",
-      "Cover for the exposure class (EC2 4.4.1), fire resistance (EN 1992-1-2 Table 5.8) and crack control by bar spacing (EC2 7.3.3).",
-    ],
-    limits: [
-      "Spans over 4.5 m are designed, with a note in the report.",
-      "Crack control uses the ULS lever arm, which gives a steel stress about 3% lower than a cracked elastic section.",
-    ],
-  },
-  {
-    name: "Beam: simply supported", to: "/beam",
-    checks: [
-      "Bending: required and minimum steel and the bars provided (EC2 6.1). When the engine chooses the bar size it also checks the clear spacing between bars (EC2 8.2).",
-      "Shear resistance and links (EC2 6.2).",
-      "Deflection by span / effective depth (EC2 7.4.2).",
-    ],
-    limits: [
-      "The crushing limit of the concrete struts (V_Rd,max) and the minimum link ratio are not checked. Check both by hand for heavily loaded or short beams.",
-    ],
-  },
-  {
-    name: "Beam: continuous", to: "/continuous-beam",
-    checks: [
-      "Analysis of the spans with the end supports taken both pinned and fixed; the worse of the two governs each section.",
-      "Bending at spans and supports, shear and links.",
-      "Deflection of every span with its own factor (single, end or interior span).",
-      "Crack control by bar size or spacing (EC2 7.3.3) and cover for the exposure class and working life (EC2 4.4.1).",
-    ],
-    limits: [
-      "No pattern loading: every span carries the full design load at once. Check alternate-span loading by hand where live load is large compared with dead load.",
-      "The quasi-permanent factor for cracking is taken as 0.6.",
-    ],
-  },
-  {
-    name: "Column", to: "/column-input",
-    checks: [
-      "Axial, uniaxial or biaxial bending, with the load entered directly or taken down from the floors.",
-      "Slenderness limit and second-order moments by nominal curvature (EC2 5.8.3.1, 5.8.8).",
-      "N-M interaction for the section; biaxial interaction (EC2 5.8.9).",
-      "Bar and link detailing limits (EC2 9.5). Section and bars can differ by storey.",
-    ],
-    limits: [
-      "Fire resistance is not checked.",
-    ],
-  },
-  {
-    name: "Foundation: pad footing", to: "/foundation-input",
-    checks: [
-      "Bearing pressure on service loads plus the weight of the footing and the soil on it, with eccentricity and uplift.",
-      "Bending at the column (or pedestal) face from the trapezoidal pressure; minimum and maximum steel.",
-      "One-way shear at d from the face and punching shear around the column (EC2 6.2, 6.4.4).",
-      "Anchorage of the bottom bars at the footing edge (EC2 9.8.2.2), a reinforcement drawing and a bar schedule with starter bars and links.",
-      "Optional: size the footing from the allowable bearing pressure, deepening it until the checks pass.",
-    ],
-    limits: [
-      "Bearing is a warning only: a footing that exceeds the allowable pressure still shows PASS overall. Read the Bearing tab.",
-      "Edge and corner columns: the reduced punching perimeters are not modelled, so punching is reported as not applicable there. Check it by hand.",
-      "The design approach (EN 1997-1) is not applied; bearing uses the allowable pressure you enter.",
-      "Links are not scheduled for circular columns.",
-    ],
-  },
-  {
-    name: "Foundation: combined footing", to: "/foundation-input?type=combined",
-    checks: [
-      "Bearing on service loads; shear force and bending moment along the footing.",
-      "Separate bottom (sagging) and top (hogging) longitudinal steel, and transverse steel.",
-      "Shear at d from each face of each column; punching at each column (EC2 6.4.4).",
-      "Optional sizing so the footing centre sits under the resultant of the two column loads.",
-    ],
-    limits: [
-      "Two rectangular columns only.",
-      "The engine does not add steel to pass shear; a shear failure needs a deeper footing.",
-      "Bearing is a warning only, as for the pad footing.",
-    ],
-  },
-  {
-    name: "Staircase", to: "/staircase-design",
-    checks: [
-      "Flight and landing analysed as a frame pinned at both ends, per metre width.",
-      "Bottom steel for the span, top steel where the flight meets the landing, distribution steel.",
-      "Deflection (EC2 7.4.2) and shear including the axial force in the frame (EC2 6.2.2).",
-      "Anchorage at the landing support, a to-scale section and a bar schedule.",
-    ],
-    limits: [
-      "The pinned frame usually shows a small uplift at the landing support. It is reported as a warning, not a failure.",
-      "The self-weight of the waist is taken on its thickness, without a slope factor.",
-    ],
-  },
-];
 
 /* ---- how to use the inputs that most often raise questions ---- */
 const GUIDES = [
@@ -211,6 +104,7 @@ export default function Help() {
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   const q = query.trim().toLowerCase();
   const hit = (...parts) => !q || parts.flat().join(" ").toLowerCase().includes(q);
+  const shortcuts = SHORTCUTS.filter((s) => hit(s.action, s.where || "", s.keys.join(" ").replace("Mod", "Ctrl Cmd"), "keyboard shortcut"));
 
   const elements = ELEMENTS.filter((e) => hit(e.name, e.checks, e.limits));
   const guides = GUIDES.filter((g) => hit(g.q, g.a));
@@ -219,10 +113,7 @@ export default function Help() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
-      <div>
-        <h1 className="text-base font-bold uppercase tracking-wide text-[#0A2F44] dark:text-[#66a4c2]">Help</h1>
-        <p className={`text-sm ${SUB}`}>What each element checks, how the inputs work, and what is left for you to check.</p>
-      </div>
+      <p className={`text-sm ${SUB}`}>What each element checks, how the inputs work, and what is left for you to check.</p>
 
       <div className="relative">
         <FiSearch className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${SUB}`} size={15} />
@@ -235,10 +126,11 @@ export default function Help() {
         <section className={`${CARD} p-5`}>
           <h2 className={TITLE}>Getting started</h2>
           <ol className={`mt-3 list-decimal space-y-1.5 pl-5 text-sm ${MAIN}`}>
-            <li>Pick an element in the sidebar and fill in the input page. Fields start from sensible defaults.</li>
+            <li>Start a design: <Link to="/quick-design" className={LINK}>New Design</Link> for a single element on its own, or open a project from <Link to="/workspace/all/projects" className={LINK}>Projects</Link> and pick an element in its design hub. Fields start from sensible defaults.</li>
             <li>Press the proceed button at the bottom. The design runs and opens the results page.</li>
             <li>Read the Overview, then the tab for each check. A failed check is named, with the numbers behind it.</li>
-            <li>Press Save to keep the design, or Download for a PDF with a cover page.</li>
+            <li>Press Save to keep the design (inside a project it is saved to that project), or Download for a PDF with a cover page. Quick designs can be added to a project later.</li>
+            <li>In <Link to="/reports" className={LINK}>Reports</Link>, record who checked each calculation and download a project's calculation package.</li>
           </ol>
           <p className={`mt-3 text-xs ${SUB}`}>
             Set your company, designer and checker once in <Link to="/settings" className={LINK}>Settings</Link>; they then appear on every report.
@@ -280,6 +172,31 @@ export default function Help() {
         </section>
       )}
 
+      {shortcuts.length > 0 && (
+        <section className={`${CARD} p-5`} data-help-shortcuts>
+          <h2 className={TITLE}>Keyboard shortcuts</h2>
+          <p className={`mt-1 text-xs ${SUB}`}>Press <ShortcutKeys keys={["?"]} /> anywhere to see this list. Ctrl is ⌘ on a Mac; G-shortcuts are pressed one after the other.</p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className={`text-[10px] uppercase tracking-wide ${SUB}`}>
+                  <th className="py-1.5 pr-4 font-semibold">Keys</th><th className="py-1.5 pr-4 font-semibold">What it does</th><th className="py-1.5 font-semibold">Where</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#f1f5f9] dark:divide-[#263244]">
+                {shortcuts.map((s) => (
+                  <tr key={s.keys.join("+")} className={MAIN}>
+                    <td className="whitespace-nowrap py-2 pr-4"><ShortcutKeys keys={s.keys} /></td>
+                    <td className="py-2 pr-4">{s.action}</td>
+                    <td className={`py-2 text-xs ${SUB}`}>{s.where || (s.go ? "Anywhere except while typing in a field." : "")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {glossary.length > 0 && (
         <section className={`${CARD} p-5`}>
           <h2 className={TITLE}>Symbols and terms</h2>
@@ -294,12 +211,12 @@ export default function Help() {
         </section>
       )}
 
-      {q && !elements.length && !guides.length && !glossary.length && (
+      {q && !elements.length && !guides.length && !glossary.length && !shortcuts.length && (
         <p className={`${CARD} p-6 text-center text-sm ${SUB}`}>Nothing in Help matches "{query}".</p>
       )}
 
       <p className={`text-xs ${SUB}`}>
-        SDH (Structural Design Hub) version {VERSION}. The results are the software's own checks; the engineer named on the
+        SDH (Sphere Design Hub) version {VERSION}. The results are the software's own checks; the engineer named on the
         report is responsible for verifying them and for the design.
       </p>
     </div>

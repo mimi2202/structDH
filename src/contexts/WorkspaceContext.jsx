@@ -1,5 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { PERSONAL_WS, ALL_WS } from '../utils/projects';
+import * as orgStore from '../utils/orgStore';
 
 // Role constants
 export const ROLES = {
@@ -34,210 +36,6 @@ export const PROJECT_ROLE_HIERARCHY = {
   [ROLES.PROJECT_VIEWER]: 1,
 };
 
-// TEMPORARY MOCK DATA - REMOVE WHEN BACKEND IS READY
-const DEFAULT_MOCK_WORKSPACES = [
-  {
-    id: "ws-1",
-    name: "Acme Engineering",
-    type: "team",
-    industry: "engineering",
-    description: "Leading structural engineering firm specializing in commercial and residential projects",
-    logo_url: null,
-    website: "https://acme-eng.com",
-    member_count: 5,
-    project_count: 12,
-    userRole: ROLES.ORG_OWNER,
-    settings: {
-      defaultProjectType: "commercial",
-      defaultDesignStandard: "Eurocode",
-      notifications: true,
-      twoFactorRequired: false
-    },
-    created_at: "2026-01-15T08:00:00Z",
-    updated_at: "2026-02-18T14:30:00Z",
-    last_active: "2026-02-19T10:30:00Z"
-  },
-  {
-    id: "ws-2",
-    name: "Personal Projects",
-    type: "personal",
-    industry: "personal",
-    description: "My personal structural design experiments and side projects",
-    logo_url: null,
-    website: null,
-    member_count: 1,
-    project_count: 3,
-    userRole: ROLES.ORG_OWNER,
-    settings: {
-      defaultProjectType: "residential",
-      defaultDesignStandard: "Eurocode",
-      notifications: true,
-      twoFactorRequired: false
-    },
-    created_at: "2026-02-01T09:00:00Z",
-    updated_at: "2026-02-17T11:20:00Z",
-    last_active: "2026-02-19T09:15:00Z"
-  }
-];
-
-const DEFAULT_MOCK_PROJECTS = [
-  {
-    id: "proj-1",
-    workspace_id: "ws-1",
-    name: "London Office Tower",
-    description: "25-storey commercial office building in Canary Wharf with retail space on ground floor",
-    project_type: "commercial",
-    location: "London, UK",
-    design_standard: "Eurocode",
-    status: "active",
-    userRole: ROLES.PROJECT_OWNER,
-    created_at: "2026-02-01T09:00:00Z",
-    updated_at: "2026-02-18T14:30:00Z"
-  },
-  {
-    id: "proj-2",
-    workspace_id: "ws-1",
-    name: "Riverside Apartments",
-    description: "Residential complex with 120 units, underground parking, and communal gardens",
-    project_type: "residential",
-    location: "Manchester, UK",
-    design_standard: "Eurocode",
-    status: "active",
-    userRole: ROLES.PROJECT_ADMIN,
-    created_at: "2026-02-05T10:30:00Z",
-    updated_at: "2026-02-17T16:20:00Z"
-  },
-  {
-    id: "proj-3",
-    workspace_id: "ws-1",
-    name: "Industrial Warehouse",
-    description: "Logistics center with 5000m² floor space and 15m clear height",
-    project_type: "industrial",
-    location: "Birmingham, UK",
-    design_standard: "Eurocode",
-    status: "active",
-    userRole: ROLES.PROJECT_EDITOR,
-    created_at: "2026-02-10T13:45:00Z",
-    updated_at: "2026-02-16T11:10:00Z"
-  },
-  {
-    id: "proj-4",
-    workspace_id: "ws-2",
-    name: "Home Extension",
-    description: "Rear extension and loft conversion for Victorian terrace house",
-    project_type: "residential",
-    location: "London, UK",
-    design_standard: "Eurocode",
-    status: "active",
-    userRole: ROLES.PROJECT_OWNER,
-    created_at: "2026-02-12T15:20:00Z",
-    updated_at: "2026-02-19T08:30:00Z"
-  },
-  {
-    id: "proj-5",
-    workspace_id: "ws-1",
-    name: "Bridge Rehabilitation",
-    description: "Structural assessment and strengthening of historic railway bridge",
-    project_type: "infrastructure",
-    location: "York, UK",
-    design_standard: "Eurocode",
-    status: "active",
-    userRole: ROLES.PROJECT_VIEWER,
-    created_at: "2026-02-14T11:00:00Z",
-    updated_at: "2026-02-15T09:45:00Z"
-  }
-];
-
-const DEFAULT_MOCK_MEMBERS = [
-  {
-    id: "member-1",
-    user_id: "user-1",
-    workspace_id: "ws-1",
-    name: "John Engineer",
-    email: "john@acme.com",
-    role: ROLES.ORG_OWNER,
-    avatar: null,
-    active: true,
-    joined_at: "2026-01-15T08:00:00Z"
-  },
-  {
-    id: "member-2",
-    user_id: "user-2",
-    workspace_id: "ws-1",
-    name: "Sarah Designer",
-    email: "sarah@acme.com",
-    role: ROLES.ORG_ADMIN,
-    avatar: null,
-    active: true,
-    joined_at: "2026-01-16T09:30:00Z"
-  },
-  {
-    id: "member-3",
-    user_id: "user-3",
-    workspace_id: "ws-1",
-    name: "Mike Analyst",
-    email: "mike@acme.com",
-    role: ROLES.ORG_EDITOR,
-    avatar: null,
-    active: true,
-    joined_at: "2026-01-20T10:15:00Z"
-  },
-  {
-    id: "member-4",
-    user_id: "user-4",
-    workspace_id: "ws-1",
-    name: "Emma Reviewer",
-    email: "emma@acme.com",
-    role: ROLES.ORG_MEMBER,
-    avatar: null,
-    active: true,
-    joined_at: "2026-01-25T14:20:00Z"
-  }
-];
-
-const DEFAULT_PENDING_INVITES = [
-  {
-    id: "invite-1",
-    email: "sarah.pending@example.com",
-    role: ROLES.ORG_ADMIN,
-    invited_by: "John Engineer",
-    invited_at: "2026-05-10T10:30:00Z",
-    status: "pending",
-    workspace_id: "ws-1"
-  },
-  {
-    id: "invite-2",
-    email: "mike.pending@example.com",
-    role: ROLES.ORG_EDITOR,
-    invited_by: "John Engineer",
-    invited_at: "2026-05-09T14:20:00Z",
-    status: "pending",
-    workspace_id: "ws-1"
-  },
-  {
-    id: "invite-3",
-    email: "emma.pending@example.com",
-    role: ROLES.ORG_MEMBER,
-    invited_by: "Sarah Designer",
-    invited_at: "2026-05-08T09:15:00Z",
-    status: "pending",
-    workspace_id: "ws-1"
-  }
-];
-
-const DEFAULT_FAILED_INVITES = [
-  {
-    id: "failed-1",
-    email: "invalid.email@example.com",
-    role: ROLES.ORG_MEMBER,
-    invited_by: "John Engineer",
-    invited_at: "2026-05-01T11:00:00Z",
-    error: "Email delivery failed",
-    status: "failed",
-    workspace_id: "ws-1"
-  }
-];
-
 // Helper functions for permissions
 export const hasOrgRole = (userRole, requiredRole) => {
   const userLevel = ORG_ROLE_HIERARCHY[userRole] || 0;
@@ -255,24 +53,20 @@ export const canEditWork = (workOwnerId, currentUserId) => {
   return workOwnerId === currentUserId;
 };
 
-// Initialize localStorage with default mock data if empty
+// Organisations, projects, members and invites live in localStorage (no
+// backend yet). Nothing is seeded: a new user starts with no organisation and
+// no project. The old sample data is removed once by orgStore.removeSampleData.
+const readList = (key) => {
+  try { const v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+};
 const initializeLocalStorage = () => {
-  if (!localStorage.getItem('mock_workspaces')) {
-    localStorage.setItem('mock_workspaces', JSON.stringify(DEFAULT_MOCK_WORKSPACES));
-  }
-  if (!localStorage.getItem('mock_projects')) {
-    localStorage.setItem('mock_projects', JSON.stringify(DEFAULT_MOCK_PROJECTS));
-  }
-  if (!localStorage.getItem('mock_members')) {
-    localStorage.setItem('mock_members', JSON.stringify(DEFAULT_MOCK_MEMBERS));
-  }
-  if (!localStorage.getItem('mock_pending_invites')) {
-    localStorage.setItem('mock_pending_invites', JSON.stringify(DEFAULT_PENDING_INVITES));
-  }
-  if (!localStorage.getItem('mock_failed_invites')) {
-    localStorage.setItem('mock_failed_invites', JSON.stringify(DEFAULT_FAILED_INVITES));
+  orgStore.removeSampleData();
+  for (const key of ['mock_workspaces', 'mock_projects', 'mock_members', 'mock_pending_invites', 'mock_failed_invites']) {
+    if (!localStorage.getItem(key)) localStorage.setItem(key, '[]');
   }
 };
+
 
 // Load mock data from localStorage
 const loadMockDataFromLocalStorage = () => {
@@ -305,230 +99,104 @@ export const WorkspaceProvider = ({ children }) => {
     }
   }, [user]);
 
+  // Organisations the signed-in user is a member of (utils/orgStore.js), each
+  // with the user's role there and live member / project counts.
   const loadWorkspaces = async () => {
-    setLoading(true);
     setError(null);
-    setTimeout(() => {
-      const { workspaces: mockWorkspaces } = loadMockDataFromLocalStorage();
-      setWorkspaces(mockWorkspaces);
-      if (mockWorkspaces.length > 0 && !currentWorkspace) {
-        setCurrentWorkspace(mockWorkspaces[0]);
-        loadProjects(mockWorkspaces[0].id);
-        loadMembers(mockWorkspaces[0].id);
-      }
-      setLoading(false);
-    }, 500);
+    const mine = orgStore.listOrgsForUser(user);
+    setWorkspaces(mine);
+    const keep = currentWorkspace && mine.find((w) => w.id === currentWorkspace.id);
+    setCurrentWorkspace(keep || mine[0] || null);
+    if (!keep && mine[0]) loadMembers(mine[0].id);
+    return mine;
   };
 
   const loadProjects = async (workspaceId) => {
     setLoading(true);
     setTimeout(() => {
-      const { projects: mockProjects } = loadMockDataFromLocalStorage();
-      const filtered = mockProjects.filter(p => p.workspace_id === workspaceId);
-      setProjects(filtered);
+      setProjects(listUserProjects(workspaceId));
       setLoading(false);
     }, 300);
+  };
+
+  // Projects the signed-in user can see. scope: PERSONAL_WS (no
+  // organisation), 'all' (personal + every organisation), or an organisation id.
+  // A personal project is only listed for its owner (older ones have no owner).
+  const listUserProjects = (scope = ALL_WS) => {
+    const { projects: all } = loadMockDataFromLocalStorage();
+    const orgs = orgStore.listOrgsForUser(user);
+    const orgIds = new Set(orgs.map((w) => w.id));
+    const mine = (p) => !p.owner_id || p.owner_id === user?.id;
+    const visible = all.filter((p) =>
+      p.workspace_id ? orgIds.has(p.workspace_id) : mine(p));
+    const picked = scope === ALL_WS ? visible
+      : scope === PERSONAL_WS ? visible.filter((p) => !p.workspace_id)
+      : visible.filter((p) => p.workspace_id === scope);
+    return picked.map((p) => ({ ...p, organisation_name: orgs.find((w) => w.id === p.workspace_id)?.name || null }));
+  };
+
+  // Move a project into an organisation, or back to personal (target null).
+  const moveProject = async (projectId, targetWorkspaceId) => {
+    const target = targetWorkspaceId && targetWorkspaceId !== PERSONAL_WS ? targetWorkspaceId : null;
+    if (target && !['owner', 'admin', 'editor'].includes(orgStore.roleIn(target, user))) {
+      return { success: false, error: 'Your role in that organisation cannot add projects.' };
+    }
+    const all = readList('mock_projects');
+    if (!all.some((p) => p.id === projectId)) return { success: false, error: 'Project not found' };
+    const updated = all.map((p) => (p.id === projectId
+      ? { ...p, workspace_id: target, owner_id: p.owner_id || user?.id, updated_at: new Date().toISOString() }
+      : p));
+    localStorage.setItem('mock_projects', JSON.stringify(updated));
+    setProjects(listUserProjects(ALL_WS));
+    loadWorkspaces();
+    return { success: true, workspaceId: target || PERSONAL_WS };
   };
 
   const loadMembers = async (workspaceId) => {
-    setLoading(true);
-    setTimeout(() => {
-      const { members: mockMembers } = loadMockDataFromLocalStorage();
-      const filtered = mockMembers.filter(m => m.workspace_id === workspaceId);
-      setMembers(filtered);
-      setLoading(false);
-    }, 300);
+    const list = orgStore.getMembers(workspaceId);
+    setMembers(list);
+    return list;
   };
 
   const loadPendingInvites = async (workspaceId) => {
-    setLoading(true);
-    setTimeout(() => {
-      const savedInvites = localStorage.getItem('mock_pending_invites');
-      const allInvites = savedInvites ? JSON.parse(savedInvites) : [...DEFAULT_PENDING_INVITES];
-      const filtered = allInvites.filter(invite => invite.workspace_id === workspaceId);
-      setPendingInvites(filtered);
-      setLoading(false);
-    }, 300);
+    const list = orgStore.getMembers(workspaceId).filter((m) => m.status === 'invited');
+    setPendingInvites(list);
+    return list;
   };
 
-  const loadFailedInvites = async (workspaceId) => {
-    setLoading(true);
-    setTimeout(() => {
-      const savedInvites = localStorage.getItem('mock_failed_invites');
-      const allInvites = savedInvites ? JSON.parse(savedInvites) : [...DEFAULT_FAILED_INVITES];
-      const filtered = allInvites.filter(invite => invite.workspace_id === workspaceId);
-      setFailedInvites(filtered);
-      setLoading(false);
-    }, 300);
+  const loadFailedInvites = async () => {
+    setFailedInvites([]);
+    return [];
   };
 
-  const cancelPendingInvite = async (inviteId) => {
-    const savedInvites = localStorage.getItem('mock_pending_invites');
-    let allInvites = savedInvites ? JSON.parse(savedInvites) : [...DEFAULT_PENDING_INVITES];
-    allInvites = allInvites.filter(invite => invite.id !== inviteId);
-    localStorage.setItem('mock_pending_invites', JSON.stringify(allInvites));
-    setPendingInvites(prev => prev.filter(invite => invite.id !== inviteId));
-    return { success: true };
+  // Every organisation change goes through utils/orgStore.js, which checks the
+  // signed-in user's role (utils/orgRbac.js) and writes the audit log; the
+  // lists are then re-read.
+  const afterOrgChange = (workspaceId, result) => {
+    loadWorkspaces();
+    if (workspaceId) { loadMembers(workspaceId); loadPendingInvites(workspaceId); }
+    return result;
   };
 
-  const leaveWorkspace = async (workspaceId) => {
-    setLoading(true);
-    try {
-      const savedMembers = localStorage.getItem('mock_members');
-      let allMembers = savedMembers ? JSON.parse(savedMembers) : [...DEFAULT_MOCK_MEMBERS];
-      allMembers = allMembers.filter(m => !(m.workspace_id === workspaceId && m.user_id === user?.id));
-      localStorage.setItem('mock_members', JSON.stringify(allMembers));
-      
-      const savedWorkspaces = localStorage.getItem('mock_workspaces');
-      let allWorkspaces = savedWorkspaces ? JSON.parse(savedWorkspaces) : [...DEFAULT_MOCK_WORKSPACES];
-      const updatedWorkspaces = allWorkspaces.filter(w => w.id !== workspaceId);
-      localStorage.setItem('mock_workspaces', JSON.stringify(updatedWorkspaces));
-      
-      setWorkspaces(updatedWorkspaces);
-      
-      if (currentWorkspace?.id === workspaceId) {
-        const nextWorkspace = updatedWorkspaces[0] || null;
-        setCurrentWorkspace(nextWorkspace);
-        if (nextWorkspace) {
-          await loadProjects(nextWorkspace.id);
-          await loadMembers(nextWorkspace.id);
-        } else {
-          setProjects([]);
-          setMembers([]);
-        }
-      }
-      
-      setLoading(false);
-      return { success: true };
-    } catch (error) {
-      setError(error.message);
-      setLoading(false);
-      return { success: false, error: error.message };
-    }
-  };
+  const cancelPendingInvite = async (memberId, workspaceId = currentWorkspace?.id) =>
+    afterOrgChange(workspaceId, orgStore.removeMember(user, workspaceId, memberId));
 
-  const transferOwnership = async (workspaceId, newOwnerId) => {
-    setLoading(true);
-    try {
-      const savedWorkspaces = localStorage.getItem('mock_workspaces');
-      const savedMembers = localStorage.getItem('mock_members');
-      let allWorkspaces = savedWorkspaces ? JSON.parse(savedWorkspaces) : [...DEFAULT_MOCK_WORKSPACES];
-      let allMembers = savedMembers ? JSON.parse(savedMembers) : [...DEFAULT_MOCK_MEMBERS];
-      
-      const workspaceIndex = allWorkspaces.findIndex(w => w.id === workspaceId);
-      if (workspaceIndex === -1) {
-        throw new Error('Workspace not found');
-      }
-      
-      const newOwnerMember = allMembers.find(m => m.user_id === newOwnerId && m.workspace_id === workspaceId);
-      if (!newOwnerMember) {
-        throw new Error('Selected member not found in this workspace');
-      }
-      
-      const currentOwnerMember = allMembers.find(m => m.workspace_id === workspaceId && m.role === ROLES.ORG_OWNER);
-      
-      allWorkspaces[workspaceIndex].userRole = ROLES.ORG_MEMBER;
-      
-      allMembers = allMembers.map(m => {
-        if (m.user_id === newOwnerId && m.workspace_id === workspaceId) {
-          return { ...m, role: ROLES.ORG_OWNER };
-        }
-        if (m.user_id === currentOwnerMember?.user_id && m.workspace_id === workspaceId) {
-          return { ...m, role: ROLES.ORG_MEMBER };
-        }
-        return m;
-      });
-      
-      localStorage.setItem('mock_workspaces', JSON.stringify(allWorkspaces));
-      localStorage.setItem('mock_members', JSON.stringify(allMembers));
-      
-      setWorkspaces(allWorkspaces);
-      if (currentWorkspace?.id === workspaceId) {
-        setCurrentWorkspace(allWorkspaces[workspaceIndex]);
-      }
-      setMembers(allMembers.filter(m => m.workspace_id === workspaceId));
-      
-      setLoading(false);
-      return { success: true };
-    } catch (error) {
-      setError(error.message);
-      setLoading(false);
-      return { success: false, error: error.message };
-    }
-  };
+  const leaveWorkspace = async (workspaceId) =>
+    afterOrgChange(null, orgStore.leaveOrg(user, workspaceId));
 
-  const deleteOrganization = async (organizationId) => {
-    setLoading(true);
-    try {
-      const savedProjects = localStorage.getItem('mock_projects');
-      const allProjects = savedProjects ? JSON.parse(savedProjects) : [];
-      const orgProjects = allProjects.filter(p => p.workspace_id === organizationId);
-      
-      if (orgProjects.length > 0) {
-        setLoading(false);
-        return { success: false, error: `Cannot delete organization with ${orgProjects.length} project(s). Delete or move all projects first.` };
-      }
-      
-      const savedWorkspaces = localStorage.getItem('mock_workspaces');
-      let allWorkspaces = savedWorkspaces ? JSON.parse(savedWorkspaces) : [];
-      const updatedWorkspaces = allWorkspaces.filter(w => w.id !== organizationId);
-      localStorage.setItem('mock_workspaces', JSON.stringify(updatedWorkspaces));
-      
-      const savedMembers = localStorage.getItem('mock_members');
-      let allMembers = savedMembers ? JSON.parse(savedMembers) : [];
-      const updatedMembers = allMembers.filter(m => m.workspace_id !== organizationId);
-      localStorage.setItem('mock_members', JSON.stringify(updatedMembers));
-      
-      setWorkspaces(updatedWorkspaces);
-      
-      if (currentWorkspace?.id === organizationId) {
-        const nextWorkspace = updatedWorkspaces[0] || null;
-        setCurrentWorkspace(nextWorkspace);
-        if (nextWorkspace) {
-          await loadProjects(nextWorkspace.id);
-          await loadMembers(nextWorkspace.id);
-        } else {
-          setProjects([]);
-          setMembers([]);
-        }
-      }
-      
-      setLoading(false);
-      return { success: true };
-    } catch (error) {
-      setError(error.message);
-      setLoading(false);
-      return { success: false, error: error.message };
-    }
-  };
+  // newOwner: the member row id
+  const transferOwnership = async (workspaceId, memberId) =>
+    afterOrgChange(workspaceId, orgStore.transferOwnership(user, workspaceId, memberId));
+
+  const deleteOrganization = async (organizationId) =>
+    afterOrgChange(null, orgStore.deleteOrg(user, organizationId));
 
   const createWorkspace = async (workspaceData) => {
-    const newWorkspace = {
-      id: `ws-${Date.now()}`,
-      ...workspaceData,
-      industry: workspaceData.industry || 'general',
-      member_count: 1,
-      project_count: 0,
-      userRole: ROLES.ORG_OWNER,
-      settings: {
-        defaultProjectType: "commercial",
-        defaultDesignStandard: "Eurocode",
-        notifications: true,
-        twoFactorRequired: false,
-        ...workspaceData.settings
-      },
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      last_active: new Date().toISOString()
-    };
-    
-    const { workspaces: currentWorkspaces } = loadMockDataFromLocalStorage();
-    const updatedWorkspaces = [...currentWorkspaces, newWorkspace];
-    localStorage.setItem('mock_workspaces', JSON.stringify(updatedWorkspaces));
-    
-    setWorkspaces(updatedWorkspaces);
-    setCurrentWorkspace(newWorkspace);
-    return { success: true, workspace: newWorkspace };
+    const res = orgStore.createOrg(user, workspaceData);
+    if (!res.success) return res;
+    await loadWorkspaces();
+    setCurrentWorkspace({ ...res.org, userRole: 'owner' });
+    return { success: true, workspace: res.org };
   };
 
   const switchWorkspace = async (workspace) => {
@@ -564,10 +232,16 @@ export const WorkspaceProvider = ({ children }) => {
   };
 
   const createProject = async (workspaceId, projectData) => {
+    const orgId = workspaceId && workspaceId !== PERSONAL_WS && workspaceId !== ALL_WS ? workspaceId : null;
+    if (orgId && !['owner', 'admin', 'editor'].includes(orgStore.roleIn(orgId, user))) {
+      return { success: false, error: 'Your role in that organisation cannot create projects.' };
+    }
     const newProject = {
       id: `proj-${Date.now()}`,
-      workspace_id: workspaceId,
       ...projectData,
+      workspace_id: orgId,
+      owner_id: user?.id || null,
+      owner_name: user?.name || null,
       status: 'active',
       userRole: ROLES.PROJECT_OWNER,
       created_at: new Date().toISOString(),
@@ -579,7 +253,7 @@ export const WorkspaceProvider = ({ children }) => {
     localStorage.setItem('mock_projects', JSON.stringify(updatedProjects));
     
     const updatedWorkspaces = currentWorkspaces.map(w => 
-      w.id === workspaceId 
+      w.id === orgId 
         ? { ...w, project_count: (w.project_count || 0) + 1 } 
         : w
     );
@@ -621,21 +295,22 @@ export const WorkspaceProvider = ({ children }) => {
   const deleteProject = async (projectId) => {
     setLoading(true);
     try {
-      const { projects: currentProjects, workspaces: currentWorkspaces } = loadMockDataFromLocalStorage();
+      const { projects: currentProjects } = loadMockDataFromLocalStorage();
       
       const projectToDelete = currentProjects.find(p => p.id === projectId);
+      // Personal project: only its owner. Organisation project: Owner or Admin there.
+      const allowed = projectToDelete && (projectToDelete.workspace_id
+        ? ['owner', 'admin'].includes(orgStore.roleIn(projectToDelete.workspace_id, user))
+        : (!projectToDelete.owner_id || projectToDelete.owner_id === user?.id));
+      if (!allowed) {
+        setLoading(false);
+        return { success: false, error: projectToDelete ? 'Your role does not allow deleting this project.' : 'Project not found.' };
+      }
       const updatedProjects = currentProjects.filter(p => p.id !== projectId);
       localStorage.setItem('mock_projects', JSON.stringify(updatedProjects));
       
-      if (projectToDelete) {
-        const updatedWorkspaces = currentWorkspaces.map(w => 
-          w.id === projectToDelete.workspace_id 
-            ? { ...w, project_count: Math.max(0, (w.project_count || 1) - 1) } 
-            : w
-        );
-        localStorage.setItem('mock_workspaces', JSON.stringify(updatedWorkspaces));
-        setWorkspaces(updatedWorkspaces);
-      }
+      // re-read organisations with the user's role (counts are computed there)
+      loadWorkspaces();
       
       setProjects(updatedProjects);
       setLoading(false);
@@ -647,116 +322,22 @@ export const WorkspaceProvider = ({ children }) => {
     }
   };
 
-  const inviteMember = async (workspaceId, email, role) => {
-    const newMember = {
-      id: `member-${Date.now()}`,
-      user_id: `user-${Date.now()}`,
-      workspace_id: workspaceId,
-      name: email.split('@')[0],
-      email: email,
-      role: role,
-      avatar: null,
-      active: true,
-      joined_at: new Date().toISOString()
-    };
-    
-    const { members: currentMembers, workspaces: currentWorkspaces } = loadMockDataFromLocalStorage();
-    const updatedMembers = [...currentMembers, newMember];
-    localStorage.setItem('mock_members', JSON.stringify(updatedMembers));
-    
-    const updatedWorkspaces = currentWorkspaces.map(w => 
-      w.id === workspaceId 
-        ? { ...w, member_count: (w.member_count || 0) + 1 } 
-        : w
-    );
-    localStorage.setItem('mock_workspaces', JSON.stringify(updatedWorkspaces));
-    
-    setMembers([...members, newMember]);
-    setWorkspaces(updatedWorkspaces);
-    
-    return { success: true, member: newMember };
-  };
+  const inviteMember = async (workspaceId, email, role) =>
+    afterOrgChange(workspaceId, orgStore.inviteMember(user, workspaceId, email, role));
 
   const updateWorkspace = async (workspaceId, data) => {
-    let updates;
-    if (data instanceof FormData) {
-      updates = {};
-      for (let [key, value] of data.entries()) {
-        updates[key] = value;
-      }
-    } else {
-      updates = data;
-    }
-    
-    const { workspaces: currentWorkspaces } = loadMockDataFromLocalStorage();
-    const updatedWorkspaces = currentWorkspaces.map(w => 
-      w.id === workspaceId 
-        ? { ...w, ...updates, updated_at: new Date().toISOString() } 
-        : w
-    );
-    localStorage.setItem('mock_workspaces', JSON.stringify(updatedWorkspaces));
-    
-    setWorkspaces(updatedWorkspaces);
-    
-    if (currentWorkspace?.id === workspaceId) {
-      setCurrentWorkspace({ ...currentWorkspace, ...updates, updated_at: new Date().toISOString() });
-    }
-    
-    return { success: true };
+    const updates = data instanceof FormData ? Object.fromEntries(data.entries()) : data;
+    return afterOrgChange(workspaceId, orgStore.updateOrg(user, workspaceId, updates));
   };
 
-  const deleteWorkspace = async (workspaceId) => {
-    const { workspaces: currentWorkspaces } = loadMockDataFromLocalStorage();
-    const updatedWorkspaces = currentWorkspaces.filter(w => w.id !== workspaceId);
-    localStorage.setItem('mock_workspaces', JSON.stringify(updatedWorkspaces));
-    
-    setWorkspaces(updatedWorkspaces);
-    
-    if (currentWorkspace?.id === workspaceId) {
-      const nextWorkspace = updatedWorkspaces[0] || null;
-      setCurrentWorkspace(nextWorkspace);
-      if (nextWorkspace) {
-        await loadProjects(nextWorkspace.id);
-        await loadMembers(nextWorkspace.id);
-      } else {
-        setProjects([]);
-        setMembers([]);
-      }
-    }
-    return { success: true };
-  };
+  const deleteWorkspace = async (workspaceId) => deleteOrganization(workspaceId);
 
-  const removeMember = async (workspaceId, userId) => {
-    const { members: currentMembers, workspaces: currentWorkspaces } = loadMockDataFromLocalStorage();
-    const updatedMembers = currentMembers.filter(m => m.user_id !== userId);
-    localStorage.setItem('mock_members', JSON.stringify(updatedMembers));
-    
-    const updatedWorkspaces = currentWorkspaces.map(w => 
-      w.id === workspaceId 
-        ? { ...w, member_count: Math.max(0, (w.member_count || 1) - 1) } 
-        : w
-    );
-    localStorage.setItem('mock_workspaces', JSON.stringify(updatedWorkspaces));
-    
-    setMembers(members.filter(m => m.user_id !== userId));
-    setWorkspaces(updatedWorkspaces);
-    
-    return { success: true };
-  };
+  // memberId: the member row id
+  const removeMember = async (workspaceId, memberId) =>
+    afterOrgChange(workspaceId, orgStore.removeMember(user, workspaceId, memberId));
 
-  const updateMemberRole = async (workspaceId, userId, role) => {
-    const { members: currentMembers } = loadMockDataFromLocalStorage();
-    const updatedMembers = currentMembers.map(m => 
-      m.user_id === userId ? { ...m, role: role } : m
-    );
-    localStorage.setItem('mock_members', JSON.stringify(updatedMembers));
-    
-    setMembers(members.map(m => 
-      m.user_id === userId ? { ...m, role: role } : m
-    ));
-    
-    return { success: true };
-  };
+  const updateMemberRole = async (workspaceId, memberId, role) =>
+    afterOrgChange(workspaceId, orgStore.changeRole(user, workspaceId, memberId, role));
 
   // Permission helper functions
   const getUserRoleInWorkspace = (workspace) => {
@@ -817,6 +398,8 @@ export const WorkspaceProvider = ({ children }) => {
     setCurrentProjectByProjectId,  // ADD THIS
     createProject,
     updateProject,
+    moveProject,
+    listUserProjects,
     deleteProject,
     inviteMember,
     updateWorkspace,

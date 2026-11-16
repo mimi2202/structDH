@@ -186,7 +186,7 @@ const ExternalDesign = () => {
 
   // Save work
   const saveWork = () => {
-    addToLog('Saving work to StructAI...', 'info')
+    addToLog('Saving work to Sphere Design Hub...', 'info')
     setTimeout(() => {
       addToLog('Work saved successfully!', 'success')
       // Save to localStorage for demo

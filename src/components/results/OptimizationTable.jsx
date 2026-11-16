@@ -6,7 +6,7 @@ const OptimizationTable = ({ data }) => {
   const options = Array.isArray(data) ? data : [];
 
   const formatCurrency = (value) => {
-    return value?.toLocaleString('en-NG', { maximumFractionDigits: 0 }) || '0';
+    return value?.toLocaleString('en-GB', { maximumFractionDigits: 0 }) || '0';
   };
 
   return (
@@ -65,7 +65,7 @@ const OptimizationTable = ({ data }) => {
                       <td className="py-3 px-4 font-mono text-[#0F172A] dark:text-white">Y{barDiameter}</td>
                       <td className="py-3 px-4 font-mono text-[#0F172A] dark:text-white">{spacing} mm</td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-[#0F172A] dark:text-white">
-                        ₦{formatCurrency(cost)}
+                        {formatCurrency(cost)}
                       </td>
                       <td className="py-3 px-4 text-right font-mono">
                         <span className={utilizationRatio <= 1.0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>

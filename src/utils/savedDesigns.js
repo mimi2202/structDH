@@ -1,4 +1,5 @@
 // src/utils/savedDesigns.js
+import { currentProjectDesign } from "./designMode";
 // Designs saved from a results page, kept in this browser's localStorage
 // (there is no design store on the backend). One list per element, newest
 // first, capped so a full report per entry cannot fill the storage quota.
@@ -21,7 +22,7 @@ export const ELEMENTS = {
 // Where and with what router state a saved design reopens. Entries saved
 // before `route`/`state` existed (slab only) kept designResult/formData.
 export const designRoute = (d, element) => d.route || ELEMENTS[element]?.route;
-export const designState = (d) => d.state || { designResult: d.designResult, formData: d.formData };
+export const designState = (d) => ({ ...(d.state || { designResult: d.designResult, formData: d.formData }), savedDesignId: d.id });
 
 // All saved designs of every element, newest first, each tagged with its element.
 export function listAllDesigns() {
@@ -43,10 +44,28 @@ export function listDesigns(element) {
   }
 }
 
+// The signed-in account, recorded as the design's owner.
+function currentUser() {
+  try {
+    const raw = localStorage.getItem("auth_user") || sessionStorage.getItem("auth_user");
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
 // entry: { project, name, status, subtitle, route, state }
+// `project` is a free-text label; `project_id` links the design to a real
+// project (set by assignToProject; absent = a quick design, in no project).
 // Returns the saved entry, or throws with a readable message.
 export function saveDesign(element, entry) {
-  const saved = { id: `${Date.now()}`, saved_at: new Date().toISOString(), ...entry };
+  const owner = currentUser();
+  // Working inside a project's design hub: the design belongs to that project.
+  const project = entry.project_id === undefined ? currentProjectDesign() : null;
+  const saved = {
+    id: `${Date.now()}`, saved_at: new Date().toISOString(),
+    owner_id: owner?.id || null, owner_name: owner?.name || owner?.email || null,
+    ...entry,
+    ...(project ? { project_id: project.id, project: project.name, assigned_at: new Date().toISOString() } : {}),
+  };
   try { if (entry.project) localStorage.setItem(LAST_PROJECT_KEY, entry.project); } catch { /* storage disabled */ }
   let list = [saved, ...listDesigns(element)].slice(0, MAX_PER_ELEMENT);
   // drop the oldest until it fits
@@ -65,4 +84,24 @@ export function deleteDesign(element, id) {
   try {
     localStorage.setItem(key(element), JSON.stringify(listDesigns(element).filter((d) => d.id !== id)));
   } catch { /* storage disabled */ }
+}
+
+function writeList(element, list) {
+  localStorage.setItem(key(element), JSON.stringify(list));
+}
+
+// Designs in no project (quick designs), every element, newest first.
+export const listUnassigned = () => listAllDesigns().filter((d) => !d.project_id);
+
+// Designs attached to one project.
+export const listForProject = (projectId) => listAllDesigns().filter((d) => d.project_id === projectId);
+
+// Attach a design to a project (or detach with project = null). The free-text
+// project label follows the project's name.
+export function assignToProject(element, id, project) {
+  const list = listDesigns(element);
+  if (!list.some((d) => d.id === id)) throw new Error("Design not found.");
+  writeList(element, list.map((d) => (d.id === id
+    ? { ...d, project_id: project?.id || null, project: project?.name || d.project, assigned_at: new Date().toISOString() }
+    : d)));
 }

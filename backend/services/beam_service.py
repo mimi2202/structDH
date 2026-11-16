@@ -16,6 +16,7 @@ from models.beam_schemas import (
     ReportRow, ReportSection,
 )
 from engine.beam_ss_engine import BeamInput, design_ss_beam
+from engine.beam_detailing import beam_detailing, detailing_report_rows
 from services.report_front_matter import (
     front_matter, ndp_partial_factors, ndp_alpha_cc_k_method, ndp_cover_rows,
     ndp_min_steel, ndp_shear_no_links, ndp_deflection, row as _fm_row,
@@ -247,7 +248,14 @@ def _calculate_beam_design(request: BeamDesignRequest) -> BeamDesignResult:
     # still reported as a genuine utilisation figure, just no longer used as
     # a strict pass/fail gate on its own.
     shear_status_ok = bool(r.get("checks", {}).get("shear", util_shear <= 1))
-    overall = "PASS" if (util_bend <= 1 and shear_status_ok and defl_status == "PASS" and crack_status == "PASS") else "FAIL"
+    # ---- detailing and bar schedule (anchorage at the supports, bar spacing)
+    det = beam_detailing(
+        support=support, span_mm=g.span, b=b, h=h, cover=geo["cover_mm"], link_phi=link,
+        link_spacing=link_spacing, link_legs=2, main_n=n_bar, main_phi=dia, top_n=2, top_phi=comp_dia,
+        VEd_kN=act["VEd_kN"], fck=fck, fyk=fy, support_width_mm=request.support_width_mm, n_members=request.n_members,
+    )
+    det_ok = det["status"] == "OK"
+    overall = "PASS" if (util_bend <= 1 and shear_status_ok and defl_status == "PASS" and crack_status == "PASS" and det_ok) else "FAIL"
     code_label = "BS 8110:1997" if is_bs else ("ACI 318" if code == "ACI318" else "EN 1992-1-1 (EC2)")
 
     section_note = (
@@ -274,6 +282,7 @@ def _calculate_beam_design(request: BeamDesignRequest) -> BeamDesignResult:
         ("Shear", None if sh["links_required"] else util_shear, "PASS" if shear_status_ok else "FAIL"),
         ("Deflection (span/depth)", defl["actual_Ld"] / defl["allowable_Ld"] if defl["allowable_Ld"] else None, defl_status),
         ("Crack width", crack / crack_limit, crack_status),
+        ("Detailing (anchorage, bar spacing)", None, "PASS" if det_ok else "FAIL"),
     ]
     report = [ReportSection(title=sec["title"], rows=[ReportRow(**x) for x in sec["rows"]])
               for sec in _front_matter(request, support_label, b, h, L, beff, checks)] + [
@@ -281,7 +290,8 @@ def _calculate_beam_design(request: BeamDesignRequest) -> BeamDesignResult:
                       rows=[ReportRow(reference=row["ref"], calculation=row["calc"], output=row["out"])
                             for row in sec["rows"]])
         for sec in r.get("report", [])
-    ]
+    ] + [ReportSection(title="Detailing and Bar Schedule",
+                       rows=[ReportRow(reference=x["ref"], calculation=x["calc"], output=x["out"]) for x in detailing_report_rows(det)])]
 
     return BeamDesignResult(
         summary=BeamSummary(
@@ -336,4 +346,5 @@ def _calculate_beam_design(request: BeamDesignRequest) -> BeamDesignResult:
         ),
         notes=notes,
         report=report,
+        detailing=det,
     )

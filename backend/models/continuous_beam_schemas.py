@@ -60,8 +60,11 @@ class ContinuousBeamRequest(BaseModel):
     # standard size, least steel among the passing designs. Off: the bar given only.
     auto_bars: bool = False
     link_diameter: int = 8
-    region: str = "Nigeria"
+    region: str = "UK"
     design_basis: BeamDesignBasis = BeamDesignBasis()
+    # detailing / bar schedule (engine/member_detailing.py)
+    support_width_mm: float = Field(230, gt=0, le=2000)
+    n_members: int = Field(1, ge=1, le=500)
 
     @model_validator(mode="after")
     def check_design_code_supported(self):
@@ -187,3 +190,4 @@ class ContinuousBeamResult(BaseModel):
     warnings: List[str]
     notes: List[str]
     bar_selection: Optional[Dict] = None   # set when auto_bars was on
+    detailing: Optional[Dict] = None       # engine/member_detailing.py

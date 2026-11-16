@@ -2041,3 +2041,4 @@ class ColumnDesignResult(BaseModel):
     failed_checks: List[str]
     report_meta: Optional[ColReportMeta] = None
     report: List[ReportSection]
+    bar_detailing: Optional[Dict] = None   # engine/member_detailing.py: marks, schedule, drawing

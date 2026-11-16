@@ -23,7 +23,7 @@ const CostBreakdown = ({ data }) => {
   const formworkCost = formwork?.cost || 0;
 
   const formatCurrency = (value) => {
-    return value.toLocaleString('en-NG', { maximumFractionDigits: 2 });
+    return value.toLocaleString('en-GB', { maximumFractionDigits: 2 });
   };
 
   return (
@@ -38,28 +38,28 @@ const CostBreakdown = ({ data }) => {
           <div className="p-4 bg-gray-50 dark:bg-[#1e293b] rounded-lg">
             <p className="text-xs text-[#64748b] dark:text-[#94a3b8] mb-1">Concrete</p>
             <p className="text-xl font-bold text-[#0F172A] dark:text-white">
-              ₦{formatCurrency(concreteCost)}
+              {formatCurrency(concreteCost)}
             </p>
             <p className="text-xs text-[#64748b] dark:text-[#94a3b8] mt-1">
-              {concreteVolume.toFixed(2)} m³ × ₦{formatCurrency(concreteRate)}/m³
+              {concreteVolume.toFixed(2)} m³ × {formatCurrency(concreteRate)}/m³
             </p>
           </div>
           <div className="p-4 bg-gray-50 dark:bg-[#1e293b] rounded-lg">
             <p className="text-xs text-[#64748b] dark:text-[#94a3b8] mb-1">Steel</p>
             <p className="text-xl font-bold text-[#0F172A] dark:text-white">
-              ₦{formatCurrency(steelCost)}
+              {formatCurrency(steelCost)}
             </p>
             <p className="text-xs text-[#64748b] dark:text-[#94a3b8] mt-1">
-              {steelWeight.toFixed(1)} kg × ₦{formatCurrency(steelRate)}/kg
+              {steelWeight.toFixed(1)} kg × {formatCurrency(steelRate)}/kg
             </p>
           </div>
           <div className="p-4 bg-gray-50 dark:bg-[#1e293b] rounded-lg">
             <p className="text-xs text-[#64748b] dark:text-[#94a3b8] mb-1">Formwork</p>
             <p className="text-xl font-bold text-[#0F172A] dark:text-white">
-              ₦{formatCurrency(formworkCost)}
+              {formatCurrency(formworkCost)}
             </p>
             <p className="text-xs text-[#64748b] dark:text-[#94a3b8] mt-1">
-              {formworkArea.toFixed(1)} m² × ₦{formatCurrency(formworkRate)}/m²
+              {formworkArea.toFixed(1)} m² × {formatCurrency(formworkRate)}/m²
             </p>
           </div>
         </div>
@@ -68,10 +68,10 @@ const CostBreakdown = ({ data }) => {
           <div className="flex justify-between items-center">
             <div>
               <p className="text-lg font-bold text-[#0A2F44] dark:text-[#66a4c2]">
-                Total Cost: ₦{formatCurrency(total)}
+                Total Cost: {formatCurrency(total)}
               </p>
               <p className="text-sm text-[#64748b] dark:text-[#94a3b8]">
-                Per m²: ₦{formatCurrency(totalPerSqm)}
+                Per m²: {formatCurrency(totalPerSqm)}
               </p>
             </div>
             <div className="w-12 h-12 bg-[#0A2F44] rounded-full flex items-center justify-center">

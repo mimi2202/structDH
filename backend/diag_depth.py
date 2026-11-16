@@ -26,7 +26,7 @@ PAYLOAD = {
                       "exposure_class": "XC3", "fire_rating": 60,
                       "crack_width_limit": 0.3, "deflection_limit": 250},
     "bar_diameters": [10, 12, 16],
-    "use_ai": False, "region": "Nigeria", "building_use": "office",
+    "use_ai": False, "region": "UK", "building_use": "office",
 }
 
 

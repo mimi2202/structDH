@@ -106,7 +106,7 @@ const DEFAULTS = {
   beamId: "B1",
   designCode: "EC2",
   supportCondition: "both_ends_simply_supported",
-  span: "6000", width: "300", depth: "500", effectiveCover: "25",
+  span: "6000", width: "300", depth: "500", effectiveCover: "25", supportWidth: "230", nMembers: "1",
   leftAdjacentSpacing: "0", rightAdjacentSpacing: "0", slabThickness: "0",
   concreteGrade: "C25/30", steelGrade: "B500",
   unitWeightConcrete: "25",
@@ -114,7 +114,6 @@ const DEFAULTS = {
   selfWeightAuto: true,
   wallLoad: "10", finishes: "1.5", additionalDeadLoad: "1.2",
   liveLoad: "3", otherLiveLoad: "2",
-  region: "Nigeria",
   ...DESIGN_BASIS_DEFAULTS,
 };
 
@@ -143,7 +142,6 @@ const CB_DEFAULTS = {
   linkDiameter: "8",
   workingLife: "50",
   exposureClass: "XC1",
-  region: "Nigeria",
   ...DESIGN_BASIS_DEFAULTS,
 };
 
@@ -294,6 +292,9 @@ const BeamInput = () => {
       bar_diameters: [parseInt(c.mainBarDia, 10) || 16],
       auto_bars: !!c.autoBars,
       link_diameter: parseInt(c.linkDiameter, 10) || 8,
+      // detailing / bar schedule
+      support_width_mm: parseFloat(c.supportWidth) || 230,
+      n_members: Math.max(1, parseInt(c.nMembers, 10) || 1),
       design_basis: {
         designer_name: (c.designerName || "").trim() || null,
         designer_qualifications: (c.designerQualifications || "").trim() || null,
@@ -468,6 +469,8 @@ const BeamInput = () => {
                     <Field label="Effective Depth (d)" unit="mm" value={c.effectiveDepth} onChange={(v) => setCb({ effectiveDepth: v })} step="5" />
                     <p className={`mt-1 text-[10px] ${SUB}`}>Leave blank to let the engine derive d from the selected bar.</p>
                   </div>
+                  <Field label="Support Width (wall / column)" unit="mm" value={c.supportWidth ?? "230"} onChange={(v) => setCb({ supportWidth: v })} step="10" />
+                  <Field label="Number of Identical Beams" unit="No." value={c.nMembers ?? "1"} onChange={(v) => setCb({ nMembers: v })} step="1" />
                 </div>
               </Section>
 
@@ -653,8 +656,11 @@ const BeamInput = () => {
                   <Field label="Slab Thickness (flange)" unit="mm" value={f.slabThickness} onChange={(v) => set({ slabThickness: v })} step="25" />
                   <Field label="Left Adjacent Spacing" unit="mm" value={f.leftAdjacentSpacing} onChange={(v) => set({ leftAdjacentSpacing: v })} step="50" />
                   <Field label="Right Adjacent Spacing" unit="mm" value={f.rightAdjacentSpacing} onChange={(v) => set({ rightAdjacentSpacing: v })} step="50" />
+                  <Field label="Support Width (wall / column)" unit="mm" value={f.supportWidth ?? "230"} onChange={(v) => set({ supportWidth: v })} step="10" />
+                  <Field label="Number of Identical Beams" unit="No." value={f.nMembers ?? "1"} onChange={(v) => set({ nMembers: v })} step="1" />
                 </div>
                 <p className="mt-2 text-xs text-[#64748b] dark:text-[#94a3b8]">
+                  Span is taken between support centrelines. Support width sets the end anchorage and the bar lengths; the number of beams multiplies the bar schedule.
                   Leave adjacent spacings at 0 to design a rectangular section. Enter the centre-to-centre spacing of adjacent beams to design as a T-beam (EC2 Cl. 5.3.2.1).
                 </p>
               </Section>
@@ -746,7 +752,7 @@ const BeamInput = () => {
 
       <div className="mt-6 border-t border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1f2937] px-6 py-4">
         <div className="flex items-center justify-end gap-3">
-          <button onClick={continuous ? proceedContinuous : proceedSimple} disabled={busy} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-5 py-2 text-sm font-medium text-white shadow-md hover:bg-[#082636] disabled:opacity-50">
+          <button data-shortcut="run" title="Run the design (Ctrl+Enter)" onClick={continuous ? proceedContinuous : proceedSimple} disabled={busy} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-5 py-2 text-sm font-medium text-white shadow-md hover:bg-[#082636] disabled:opacity-50">
             {busy ? <FiLoader className="animate-spin" size={15} /> : null}{busy ? "Designing…" : "Proceed to Design"} <FiArrowRight size={15} />
           </button>
         </div>

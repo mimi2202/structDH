@@ -13,20 +13,25 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import WorkspaceDashboard from './pages/WorkspaceDashboard';
-import CreateWorkspace from './pages/CreateWorkspace';
-import Projects from './pages/Projects';
-import ProjectDetail from './pages/ProjectDetail';
-import TeamMembers from './pages/TeamMembers';
-import WorkspaceSettings from './pages/WorkspaceSettings';
+// Old organisation pages (CreateWorkspace, OrganizationOverview, TeamMembers,
+// OrganisationTeam, WorkspaceSettings) are kept on disk but replaced by pages/org/.
+import OrgHome from './pages/org/OrgHome';
+import OrgCreate from './pages/org/OrgCreate';
+import OrgConsole from './pages/org/OrgConsole';
 import StructuralInput from './pages/StructuralInput';
 import StructuralResults from './pages/StructuralResults';
 import ProjectSetup from './pages/ProjectSetup';
-import NewDesign from './pages/NewDesign';
-import OrganisationTeam from './pages/OrganisationTeam';
-import OrganizationOverview from './pages/OrganizationOverview';
-import QuickDesign from './pages/QuickDesign';
-import SavedDesigns from './pages/SavedDesigns';
-import ExternalDesign from './pages/ExternalDesign';
+// pages/QuickDesign.jsx and NewDesign.jsx (old, mock calculations) are kept on disk, unrouted.
+import QuickDesignHome from './pages/quick/QuickDesignHome';
+import ProjectDesignHub from './pages/project/ProjectDesignHub';
+import ProjectPage from './pages/project/ProjectPage';
+import ReportsPage from './pages/reports/ReportsPage';
+import ShortcutLayer from './components/ShortcutLayer';
+// pages/Projects.jsx (old card grid) kept on disk, unrouted.
+import ProjectsPage from './pages/project/ProjectsPage';
+// pages/SavedDesigns.jsx and pages/ExternalDesign.jsx (old) kept on disk, unrouted.
+import SavedDesignsPage from './pages/saved/SavedDesignsPage';
+import ExternalDesignPage from './pages/external/ExternalDesignPage';
 import SDHAgentDownload from './pages/SDHAgentDownload';
 import MainLayout from './components/layout/MainLayout';
 import ResultsDashboard from './pages/ResultsDashboard';
@@ -41,6 +46,8 @@ import FoundationInput from './pages/FoundationInput';
 import FoundationResults from './pages/FoundationResults';
 import StaircaseInput from './pages/StaircaseInput';
 import StaircaseResults from './pages/StaircaseResults';
+import Profile from './pages/Profile';
+import AccountLayout from './components/layout/AccountLayout';
 import Settings from './pages/Settings';
 import Help from './pages/Help';
 import LoadCases from './pages/LoadCases';
@@ -55,6 +62,7 @@ function App() {
             <NotificationProvider>
               <DesignMetaProvider>
               <BrowserRouter>
+                <ShortcutLayer />
                 <div className="min-h-screen w-full bg-white dark:bg-[#111827] transition-colors duration-300">
                   <Routes>
                     {/* Public routes */}
@@ -71,45 +79,57 @@ function App() {
                     } />
 
                     {/* Workspace Routes - NO MainLayout */}
+                    <Route path="/reports" element={
+                      <ProtectedRoute>
+                        <ReportsPage />
+                      </ProtectedRoute>
+                    } />
+
+                    <Route path="/organisations" element={
+                      <ProtectedRoute>
+                        <OrgHome />
+                      </ProtectedRoute>
+                    } />
+
                     <Route path="/workspace/create" element={
                       <ProtectedRoute>
-                        <CreateWorkspace />
+                        <OrgCreate />
                       </ProtectedRoute>
                     } />
 
                     <Route path="/workspace/:workspaceId" element={
                       <ProtectedRoute>
-                        <OrganizationOverview />
+                        <OrgConsole />
                       </ProtectedRoute>
                     } />
 
                     <Route path="/workspace/:workspaceId/projects" element={
                       <ProtectedRoute>
-                        <Projects />
+                        <ProjectsPage />
                       </ProtectedRoute>
                     } />
 
                     <Route path="/workspace/:workspaceId/projects/:projectId" element={
                       <ProtectedRoute>
-                        <ProjectDetail />
+                        <ProjectPage />
                       </ProtectedRoute>
                     } />
 
                     <Route path="/workspace/:workspaceId/members" element={
                       <ProtectedRoute>
-                        <TeamMembers />
+                        <OrgConsole initialTab="members" />
                       </ProtectedRoute>
                     } />
 
                     <Route path="/workspace/:workspaceId/team" element={
                       <ProtectedRoute>
-                        <OrganisationTeam />
+                        <OrgConsole initialTab="members" />
                       </ProtectedRoute>
                     } />
 
                     <Route path="/workspace/:workspaceId/settings" element={
                       <ProtectedRoute>
-                        <WorkspaceSettings />
+                        <OrgConsole initialTab="settings" />
                       </ProtectedRoute>
                     } />
 
@@ -126,6 +146,14 @@ function App() {
                       <ProtectedRoute>
                         <MainLayout currentModule="slab" breadcrumb="Slab Design > Input">
                           <StructuralInput />
+                        </MainLayout>
+                      </ProtectedRoute>
+                    } />
+
+                    <Route path="/workspace/:workspaceId/projects/:projectId/design" element={
+                      <ProtectedRoute>
+                        <MainLayout currentModule="project-hub" breadcrumb="Projects > Design Hub">
+                          <ProjectDesignHub />
                         </MainLayout>
                       </ProtectedRoute>
                     } />
@@ -274,9 +302,16 @@ function App() {
 
                   <Route path="/settings" element={
                     <ProtectedRoute>
-                      <MainLayout currentModule="settings" breadcrumb="Settings">
-                        <Settings />
-                      </MainLayout>
+                      <AccountLayout title="Settings" subtitle="Report identity, design defaults and backups">
+                        <div className="p-4 sm:p-8"><Settings /></div>
+                      </AccountLayout>
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/profile" element={
+                    <ProtectedRoute>
+                      <AccountLayout title="Profile" subtitle="Your details are kept with your account in this browser">
+                        <div className="p-4 sm:p-8"><Profile /></div>
+                      </AccountLayout>
                     </ProtectedRoute>
                   } />
                   <Route path="/load-cases" element={
@@ -295,9 +330,9 @@ function App() {
                   } />
                   <Route path="/help" element={
                     <ProtectedRoute>
-                      <MainLayout currentModule="help" breadcrumb="Help">
-                        <Help />
-                      </MainLayout>
+                      <AccountLayout title="Help" subtitle="How to use Sphere Design Hub">
+                        <div className="p-4 sm:p-8"><Help /></div>
+                      </AccountLayout>
                     </ProtectedRoute>
                   } />
 
@@ -306,13 +341,13 @@ function App() {
                     {/* External Design Routes */}
                     <Route path="/workspace/:workspaceId/projects/:projectId/external-design" element={
                       <ProtectedRoute>
-                        <ExternalDesign />
+                        <ExternalDesignPage />
                       </ProtectedRoute>
                     } />
 
                     <Route path="/workspace/:workspaceId/projects/:projectId/external-design/:workId" element={
                       <ProtectedRoute>
-                        <ExternalDesign />
+                        <ExternalDesignPage />
                       </ProtectedRoute>
                     } />
 
@@ -324,24 +359,18 @@ function App() {
                     } />
 
                     {/* Quick Design Routes */}
-                    <Route path="/new-design" element={
-                      <ProtectedRoute>
-                        <NewDesign />
-                      </ProtectedRoute>
-                    } />
+                    <Route path="/new-design" element={<Navigate to="/quick-design" replace />} />
 
                     {/* QUICK DESIGN SLAB - WITH MainLayout */}
                     <Route path="/quick-design" element={
                       <ProtectedRoute>
-                        <MainLayout currentModule="slab" breadcrumb="Quick Design > Slab Input">
-                          <QuickDesign />
-                        </MainLayout>
+                        <QuickDesignHome />
                       </ProtectedRoute>
                     } />
 
                     <Route path="/saved-designs" element={
                       <ProtectedRoute>
-                        <SavedDesigns />
+                        <SavedDesignsPage />
                       </ProtectedRoute>
                     } />
 
@@ -356,7 +385,7 @@ function App() {
                     {/* External Tools */}
                     <Route path="/external-design" element={
                       <ProtectedRoute>
-                        <ExternalDesign />
+                        <ExternalDesignPage />
                       </ProtectedRoute>
                     } />
 

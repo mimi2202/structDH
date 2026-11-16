@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   FiGrid,
   FiBarChart2,
@@ -18,72 +18,34 @@ import {
   FiDownload,
 } from 'react-icons/fi'
 import { useAuth } from '../../contexts/AuthContext'
-import { useWorkspace, ROLES } from '../../contexts/WorkspaceContext'
+import { listForProject, assignToProject, deleteDesign, designRoute, designState, ELEMENTS } from '../../utils/savedDesigns'
 
 const ProjectWorkTab = ({ projectId, refreshTrigger }) => {
-  const { workspaceId } = useParams()
   const { user } = useAuth()
-  const { currentProject } = useWorkspace()
+  const { workspaceId } = useParams()
   const [works, setWorks] = useState([])
   const [loading, setLoading] = useState(true)
-  const [selectedWork, setSelectedWork] = useState(null)
   const [showActionMenu, setShowActionMenu] = useState(null)
 
-  // Mock designs data - replace with API call
-  const mockWorks = [
-    {
-      id: 'work-1',
-      name: 'Ground Floor Slab',
-      type: 'slab',
-      owner_id: 'user-1',
-      owner_name: 'John Engineer',
-      owner_avatar: 'JE',
-      created_at: '2026-06-01T10:00:00Z',
-      updated_at: '2026-06-05T14:30:00Z',
-      status: 'completed',
-      thumbnail: null,
-      parameters: { thickness: 200, span: 6.0 },
-    },
-    {
-      id: 'work-2',
-      name: 'First Floor Beam',
-      type: 'beam',
-      owner_id: 'user-2',
-      owner_name: 'Sarah Designer',
-      owner_avatar: 'SD',
-      created_at: '2026-06-02T09:00:00Z',
-      updated_at: '2026-06-04T11:20:00Z',
-      status: 'in-progress',
-      thumbnail: null,
-      parameters: { width: 300, depth: 500, span: 5.5 },
-    },
-    {
-      id: 'work-3',
-      name: 'Column Design - Ground Floor',
-      type: 'column',
-      owner_id: 'user-1',
-      owner_name: 'John Engineer',
-      owner_avatar: 'JE',
-      created_at: '2026-06-03T14:00:00Z',
-      updated_at: '2026-06-06T09:15:00Z',
-      status: 'draft',
-      thumbnail: null,
-      parameters: { width: 400, depth: 400, height: 3.5 },
-    },
-    {
-      id: 'work-4',
-      name: 'Foundation Pad',
-      type: 'foundation',
-      owner_id: 'user-3',
-      owner_name: 'Mike Analyst',
-      owner_avatar: 'MA',
-      created_at: '2026-06-04T11:00:00Z',
-      updated_at: '2026-06-04T16:45:00Z',
-      status: 'review',
-      thumbnail: null,
-      parameters: { width: 1200, depth: 1200, thickness: 300 },
-    },
-  ]
+  const navigate = useNavigate()
+
+  // Designs attached to this project (quick designs added from /quick-design),
+  // shaped for the list below. status: PASS -> completed, FAIL -> review.
+  const loadWorks = () => listForProject(projectId).map((d) => ({
+    id: d.id,
+    element: d.element,
+    name: d.name || 'Untitled design',
+    type: d.element === 'continuous-slab' ? 'slab' : d.element === 'continuous-beam' ? 'beam' : d.element,
+    element_label: ELEMENTS[d.element]?.label || d.element,
+    subtitle: d.subtitle,
+    owner_id: d.owner_id || 'unknown',
+    owner_name: d.owner_name || 'Unknown',
+    owner_avatar: String(d.owner_name || '?').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase(),
+    created_at: d.saved_at,
+    updated_at: d.assigned_at || d.saved_at,
+    status: d.status === 'PASS' ? 'completed' : d.status === 'FAIL' ? 'review' : 'draft',
+    raw: d,
+  }))
 
   const getTypeIcon = (type) => {
     switch (type) {
@@ -144,50 +106,40 @@ const ProjectWorkTab = ({ projectId, refreshTrigger }) => {
     return date.toLocaleDateString()
   }
 
-  const canEditWork = (workOwnerId) => {
-    const isOwner = workOwnerId === user?.id
-    const isProjectOwner = currentProject?.userRole === ROLES.PROJECT_OWNER
-    const isProjectAdmin = currentProject?.userRole === ROLES.PROJECT_ADMIN
-    return isOwner
-  }
-
-  const canDeleteWork = (workOwnerId) => {
-    const isOwner = workOwnerId === user?.id
-    const isProjectOwner = currentProject?.userRole === ROLES.PROJECT_OWNER
-    // According to PDF: Only work owner can delete
-    return isOwner
-  }
+  // Only the person who saved a design changes it (designs saved before
+  // owners were recorded are open to everyone in the project).
+  const canEditWork = (workOwnerId) => workOwnerId === 'unknown' || workOwnerId === user?.id
+  const canDeleteWork = canEditWork
 
   const handleOpenWork = (work) => {
-    // Navigate to work detail page
-    console.log('Open work:', work)
+    navigate(designRoute(work.raw, work.element), { state: designState(work.raw) })
   }
 
   const handleEditWork = (work) => {
-    console.log('Edit work:', work)
     setShowActionMenu(null)
+    handleOpenWork(work)
   }
 
   const handleDeleteWork = (work) => {
-    if (window.confirm(`Delete "${work.name}"? This action cannot be undone.`)) {
-      console.log('Delete work:', work)
+    if (window.confirm(`Delete "${work.name}"? The saved result and report are removed.`)) {
+      deleteDesign(work.element, work.id)
       setShowActionMenu(null)
+      setWorks(loadWorks())
     }
   }
 
+  // "Remove from project": the design goes back to the quick designs list.
   const handleDuplicateWork = (work) => {
-    console.log('Duplicate work:', work)
+    assignToProject(work.element, work.id, null)
     setShowActionMenu(null)
+    setWorks(loadWorks())
   }
 
   useEffect(() => {
-    setLoading(true)
-    // Simulate API call
-    setTimeout(() => {
-      setWorks(mockWorks)
-      setLoading(false)
-    }, 500)
-  }, [refreshTrigger])
+    setWorks(loadWorks())
+    setLoading(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTrigger, projectId])
 
   // Group works by owner
   const groupedByOwner = works.reduce((groups, work) => {
@@ -226,7 +178,7 @@ const ProjectWorkTab = ({ projectId, refreshTrigger }) => {
         </div>
         <div className="flex space-x-3">
           <Link
-            to={`/workspace/${workspaceId}/projects/${projectId}/slab`}
+            to={`/workspace/${workspaceId}/projects/${projectId}/design`}
             className="px-4 py-2 bg-[#0A2F44] text-white rounded-lg hover:bg-[#082636] transition-colors text-sm"
           >
             + New Design
@@ -241,10 +193,10 @@ const ProjectWorkTab = ({ projectId, refreshTrigger }) => {
             No designs yet
           </h3>
           <p className="text-[#6b7280] dark:text-[#9ca3af] mb-6">
-            Create your first structural design for this project
+            Open the project’s design hub, run a design and save it; or add a quick design to this project
           </p>
           <Link
-            to={`/workspace/${workspaceId}/projects/${projectId}/slab`}
+            to={`/workspace/${workspaceId}/projects/${projectId}/design`}
             className="inline-block px-4 py-2 bg-[#0A2F44] text-white rounded-lg hover:bg-[#082636]"
           >
             Create Design
@@ -303,10 +255,8 @@ const ProjectWorkTab = ({ projectId, refreshTrigger }) => {
                             <FiClock className="mr-1 text-xs" />
                             Updated {formatDate(work.updated_at)}
                           </span>
-                          {work.parameters?.thickness && (
-                            <span>{work.parameters.thickness}mm thickness</span>
-                          )}
-                          {work.parameters?.span && <span>{work.parameters.span}m span</span>}
+                          <span className="font-mono uppercase">{work.element_label}</span>
+                          {work.subtitle && <span>{work.subtitle}</span>}
                         </div>
                       </div>
                     </div>
@@ -347,7 +297,7 @@ const ProjectWorkTab = ({ projectId, refreshTrigger }) => {
                                   className="w-full px-4 py-2 text-left text-sm hover:bg-[#f3f4f6] dark:hover:bg-[#374151] flex items-center space-x-2"
                                 >
                                   <FiCopy />
-                                  <span>Duplicate</span>
+                                  <span>Remove from project</span>
                                 </button>
                                 {canDeleteWork(work.owner_id) && (
                                   <button
@@ -387,8 +337,8 @@ const ProjectWorkTab = ({ projectId, refreshTrigger }) => {
           <div>
             <p className="text-sm font-medium text-[#02090d] dark:text-white">Work Access Rules</p>
             <p className="text-xs text-[#0A2F44] dark:text-[#cce1eb] mt-1">
-              Only the owner of a design can edit or delete it. Other team members can view but
-              cannot modify. Project owners and admins have full access to all works.
+              Anyone with access to the project can open its designs. Only the person who saved a
+              design can remove it from the project or delete it.
             </p>
           </div>
         </div>

@@ -590,12 +590,12 @@ export default function ColumnInput() {
             <FiChevronLeft size={15} /> Back
           </button>
           {step < STEPS.length - 1 ? (
-            <button onClick={() => goTo(step + 1)}
+            <button data-shortcut="next" title="Next step (Ctrl+Enter)" onClick={() => goTo(step + 1)}
               className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-5 py-2 text-sm font-medium text-white hover:bg-[#082636]">
               Next <FiChevronRight size={15} />
             </button>
           ) : (
-            <button onClick={run} disabled={busy}
+            <button data-shortcut="run" title="Run the design (Ctrl+Enter)" onClick={run} disabled={busy}
               className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-5 py-2 text-sm font-medium text-white hover:bg-[#082636] disabled:opacity-50">
               {busy ? <FiLoader className="animate-spin" size={15} /> : null} Run Column Design
             </button>

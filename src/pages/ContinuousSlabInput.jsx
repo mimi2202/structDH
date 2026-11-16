@@ -31,8 +31,6 @@ const SUPPORTS = [
   { value: "fixed", label: "Fixed" },
 ];
 const BAR_DIAS = [8, 10, 12, 16, 20];
-// Region only selects the cost-rate table (backend rates_db.json); it does not change the design.
-const REGIONS = ["Nigeria", "UK"];
 const EXPOSURE_CLASSES = ["XC1", "XC2", "XC3", "XC4"];
 const FIRE_RATINGS = [0, 30, 60, 90, 120, 180, 240];   // minutes, EN 1992-1-2 Table 5.8 (0 = not checked)
 const CRACK_LIMITS = ["0.2", "0.3", "0.4"];            // mm
@@ -56,7 +54,6 @@ const DEFAULTS = {
   autoBars: false,
   designCode: "EC2",
   occupancy: "",
-  region: "Nigeria",
   exposureClass: "XC3",
   fireRating: "60",
   crackWidthLimit: "0.3",
@@ -148,7 +145,7 @@ export default function ContinuousSlabInput() {
             <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#0A2F44] text-white">
               <FiHome size={15} />
             </div>
-            <span className={`text-sm font-bold ${MAIN}`}>Struct Design Hub</span>
+            <span className={`text-sm font-bold ${MAIN}`}>Sphere Design Hub</span>
           </div>
           <Crumbs items={[
             { label: "Slab Design", to: "/structural-input" },
@@ -221,6 +218,16 @@ export default function ContinuousSlabInput() {
                   <p className={`mt-1 text-[10px] ${SUB}`}>+5 mm fixing tolerance (fixed)</p>
                 </div>
                 <div>
+                  <label className={LABEL}>Slab width <span className="text-[#94a3b8]">(mm, across the spans)</span></label>
+                  <input type="number" step="100" value={form.slabWidth ?? "1000"} onChange={(e) => set({ slabWidth: e.target.value })} className={INPUT} />
+                  <p className={`mt-1 text-[10px] ${SUB}`}>For the bar schedule; 1000 = per metre strip</p>
+                </div>
+                <div>
+                  <label className={LABEL}>Support width <span className="text-[#94a3b8]">(mm)</span></label>
+                  <input type="number" step="10" value={form.supportWidth ?? "230"} onChange={(e) => set({ supportWidth: e.target.value })} className={INPUT} />
+                  <p className={`mt-1 text-[10px] ${SUB}`}>Walls / beams under the slab</p>
+                </div>
+                <div>
                   <label className={LABEL}>Main bar &Oslash; <span className="text-[#94a3b8]">(mm)</span></label>
                   <Dropdown value={form.mainBarDia} onChange={(v) => set({ mainBarDia: v })} options={BAR_DIAS.map((d) => ({ value: String(d), label: `\u00d8${d}` }))} />
                   <label className="mt-2 flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={!!form.autoBars} onChange={(e) => set({ autoBars: e.target.checked })} className="h-4 w-4 accent-[#0A2F44]" /><span>Let the engine choose the bar size</span></label>
@@ -239,11 +246,6 @@ export default function ContinuousSlabInput() {
                   <div className="flex h-[38px] items-center rounded-lg border border-[#e2e8f0] px-3 font-mono text-sm dark:border-[#334155]">
                     <span className={MAIN}>EN 1992-1-1 (Eurocode 2)</span>
                   </div>
-                </div>
-                <div>
-                  <label className={LABEL}>Region</label>
-                  <Dropdown value={form.region} onChange={(v) => set({ region: v })} options={REGIONS.map((r) => ({ value: r, label: r }))} />
-                  <p className={`mt-1 text-[10px] ${SUB}`}>Cost rates only</p>
                 </div>
                 <div>
                   <label className={LABEL}>Exposure class</label>
@@ -360,7 +362,7 @@ export default function ContinuousSlabInput() {
         </div>
 
         <div className="mt-6 flex items-center justify-end gap-3">
-          <button onClick={run} disabled={busy} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-5 py-2 text-sm font-medium text-white hover:bg-[#082636] disabled:opacity-50">
+          <button data-shortcut="run" title="Run the design (Ctrl+Enter)" onClick={run} disabled={busy} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-5 py-2 text-sm font-medium text-white hover:bg-[#082636] disabled:opacity-50">
             {busy ? <FiLoader className="animate-spin" size={15} /> : null}
             {busy ? "Designing…" : "Run Design"} <FiArrowRight size={15} />
           </button>

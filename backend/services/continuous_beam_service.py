@@ -396,8 +396,19 @@ def _calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeam
     all_bars = [sd.get("bars", "") for sd in list(fl["spans"].values()) + list(fl["supports"].values())]
     cover_rows, cover_status, cover_ratio = _cover_check(request, link, all_bars)
     crack_rows, crack_status, crack_ratio, crack_lim = _crack_check(request, r, fl, span_gk, span_qk, link)
+    # ---- detailing and bar schedule (engine/member_detailing.py)
+    from engine.member_detailing import continuous_beam_detailing
+    det = continuous_beam_detailing(
+        spans_mm=lengths, b=b, h=h, cover=cover + 5, link_phi=link,
+        bottom=[{"n": int(s.bottom_steel.get("count") or 2), "phi": float(s.bottom_steel.get("bar_diameter") or 12)} for s in spans_out],
+        supports=[{"n": int(s.top_steel.get("count") or 2), "phi": float(s.top_steel.get("bar_diameter") or 12),
+                   "link_s": float(s.links.get("spacing") or 300), "V_kN": float(s.shear or 0)} for s in support_results],
+        end_fixed=_enum(request.end_support) == "continuous", fck=fck, fyk=fy,
+        support_width_mm=request.support_width_mm, n_members=request.n_members,
+    )
+    det_ok = det["status"] == "OK"
     overall = "PASS" if (bend_ok and shear_ok and defl_status == "PASS" and cover_status == "PASS"
-                         and crack_status == "PASS") else "FAIL"
+                         and crack_status == "PASS" and det_ok) else "FAIL"
     code_label = "BS 8110:1997" if is_bs else "EN 1992-1-1 (EC2)"
 
     shr = r["shear"]
@@ -439,7 +450,8 @@ def _calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeam
               ("Shear", util_shear, "PASS" if shear_ok else "FAIL"),
               ("Deflection (span/depth)", defl["actual_Ld"] / defl["allowable_Ld"] if defl.get("allowable_Ld") else None, defl_status),
               (f"Cover for exposure {_enum(request.design_params.exposure_class)}", cover_ratio, cover_status),
-              ("Crack control (EC2 7.3.3)", crack_ratio, crack_status)]
+              ("Crack control (EC2 7.3.3)", crack_ratio, crack_status),
+              ("Detailing (end anchorage)", None, "PASS" if det_ok else "FAIL")]
     report = [ReportSection(title=sec["title"], rows=[ReportRow(**x) for x in sec["rows"]])
               for sec in _front_matter(request, n, lengths, b, h, checks)]
     ends = ("Continuous (monolithic) end supports: the outer supports are analysed fixed as well as "
@@ -456,6 +468,8 @@ def _calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeam
                                 rows=[ReportRow(reference=x["ref"], calculation=x["calc"], output=x["out"]) for x in cover_rows]))
     report.append(ReportSection(title="10c. Crack Control (EC2 7.3.3)",
                                 rows=[ReportRow(reference=x["ref"], calculation=x["calc"], output=x["out"]) for x in crack_rows]))
+    report.append(ReportSection(title="11. Detailing and Bar Schedule",
+                                rows=[ReportRow(reference=x["ref"], calculation=x["calc"], output=x["out"]) for x in det.pop("report_rows")]))
 
     warnings = []
     Lmin, Lmax = min(lengths), max(lengths)
@@ -513,4 +527,4 @@ def _calculate_continuous_beam(request: ContinuousBeamRequest) -> ContinuousBeam
                   deflection_status=defl_status, crack_width=None, crack_limit=crack_lim,
                   crack_status=crack_status, crack_ratio=round(crack_ratio, 2)),
         shear_detail=shear_detail, deflection_detail=deflection_detail,
-        report=report, warnings=warnings, notes=notes)
+        report=report, warnings=warnings, notes=notes, detailing=det)

@@ -8,14 +8,6 @@
         "reinforcement": {"B500": 1300},
         "formwork": {"flat_slab": 50}
       }
-    },
-    "Nigeria": {
-      "currency": "NGN",
-      "materials": {
-        "concrete": {"C25/30": 95000, "C30/37": 105000},
-        "reinforcement": {"B500": 950000},
-        "formwork": {"flat_slab": 15000}
-      }
     }
   }
 }

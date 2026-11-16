@@ -71,8 +71,11 @@ class BeamDesignRequest(BaseModel):
     # standard size, least steel among the passing designs. Off: the bar given only.
     auto_bars: bool = False
     link_diameter: int = 8
-    region: str = "Nigeria"
+    region: str = "UK"
     design_basis: BeamDesignBasis = BeamDesignBasis()
+    # detailing / bar schedule (engine/beam_detailing.py)
+    support_width_mm: float = Field(230, gt=0, le=2000, description="width of each support (wall / column), mm")
+    n_members: int = Field(1, ge=1, le=500, description="identical beams, for the bar schedule")
 
     @model_validator(mode="after")
     def check_design_code_supported(self):
@@ -200,3 +203,4 @@ class BeamDesignResult(BaseModel):
     notes: List[str]
     report: List[ReportSection] = []
     bar_selection: Optional[Dict] = None   # set when auto_bars was on
+    detailing: Optional[Dict] = None       # engine/beam_detailing.py: marks, anchorage, schedule, drawing data

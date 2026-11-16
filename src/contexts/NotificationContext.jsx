@@ -1,130 +1,111 @@
 // src/contexts/NotificationContext.jsx
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import * as orgStore from '../utils/orgStore';
+import { roleLabel } from '../utils/orgRbac';
 import { useAuth } from './AuthContext';
 
 const NotificationContext = createContext();
 
 export const useNotifications = () => useContext(NotificationContext);
 
-// Mock notifications data
-const MOCK_NOTIFICATIONS = [
-  {
-    id: 'notif-1',
+// Real notifications only (they used to be four hard-coded samples about
+// "Acme Engineering"). Built on every read from the organisation data:
+//   - pending invitations for the signed-in user's email (accept / decline here);
+//   - audit-log events in the user's organisations that were done TO the user
+//     by someone else: role changed, ownership transferred to them.
+// Read / dismissed ids are kept per user in localStorage.
+const stateKey = (uid) => `notifications_state_${uid}`;
+const readState = (uid) => {
+  try { return { read: [], dismissed: [], ...JSON.parse(localStorage.getItem(stateKey(uid))) }; }
+  catch { return { read: [], dismissed: [] }; }
+};
+const saveState = (uid, st) => {
+  try { localStorage.setItem(stateKey(uid), JSON.stringify(st)); } catch { /* storage full */ }
+};
+
+function buildNotifications(user) {
+  if (!user) return [];
+  const email = (user.email || '').toLowerCase();
+  const list = orgStore.listInvitesForUser(user).map((inv) => ({
+    id: `invite:${inv.id}`,
+    member_id: inv.id,
     type: 'invite',
-    title: 'Workspace Invitation',
-    message: 'John Engineer invited you to join "Acme Engineering" as Admin',
-    workspace_id: 'ws-1',
-    workspace_name: 'Acme Engineering',
-    role: 'admin',
     status: 'pending',
-    created_at: new Date(Date.now() - 3600000).toISOString(),
-    read: false
-  },
-  {
-    id: 'notif-2',
-    type: 'transfer',
-    title: 'Ownership Transfer',
-    message: 'John Engineer transferred workspace ownership to you',
-    workspace_id: 'ws-1',
-    workspace_name: 'Acme Engineering',
-    status: 'pending',
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-    read: true
-  },
-  {
-    id: 'notif-3',
-    type: 'invite',
-    title: 'Project Invitation',
-    message: 'Sarah Designer invited you to join project "London Office Tower" as Editor',
-    project_id: 'proj-1',
-    project_name: 'London Office Tower',
-    role: 'editor',
-    status: 'pending',
-    created_at: new Date(Date.now() - 172800000).toISOString(),
-    read: false
-  },
-  {
-    id: 'notif-4',
-    type: 'member_joined',
-    title: 'New Member',
-    message: 'Mike Analyst has joined your workspace',
-    workspace_id: 'ws-1',
-    workspace_name: 'Acme Engineering',
-    user_name: 'Mike Analyst',
-    status: 'accepted',
-    created_at: new Date(Date.now() - 259200000).toISOString(),
-    read: false
+    title: 'Organisation invitation',
+    message: `${inv.invited_by_name || 'A member'} invited you to join "${inv.org.name}" as ${roleLabel(inv.role)}`,
+    workspace_id: inv.org.id,
+    workspace_name: inv.org.name,
+    role: roleLabel(inv.role),
+    created_at: inv.invited_at,
+  }));
+  for (const org of orgStore.listOrgsForUser(user)) {
+    orgStore.getAudit(org.id).forEach((a, i) => {
+      if (a.actor_id === user.id || (a.target || '').toLowerCase() !== email) return;
+      if (a.action !== 'member.role' && a.action !== 'org.transfer') return;
+      list.push({
+        id: `audit:${org.id}:${a.at}:${i}`,
+        type: a.action === 'org.transfer' ? 'transfer' : 'role',
+        title: a.action === 'org.transfer' ? 'You are now the Owner' : 'Your role changed',
+        message: a.action === 'org.transfer'
+          ? `${a.actor_name} transferred "${org.name}" to you`
+          : `${a.actor_name} changed your role in "${org.name}": ${a.detail}`,
+        workspace_id: org.id,
+        workspace_name: org.name,
+        created_at: a.at,
+      });
+    });
   }
-];
+  const st = readState(user.id);
+  return list
+    .filter((n) => !st.dismissed.includes(n.id))
+    .map((n) => ({ ...n, read: st.read.includes(n.id) }))
+    .sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)));
+}
 
 export const NotificationProvider = ({ children }) => {
   const { user } = useAuth();
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [tick, setTick] = useState(0);
 
+  // Re-read when organisation data changes (this tab or another).
   useEffect(() => {
-    if (user) {
-      loadNotifications();
-    }
-  }, [user]);
+    const bump = () => setTick((t) => t + 1);
+    window.addEventListener(orgStore.ORG_EVENT, bump);
+    window.addEventListener('storage', bump);
+    window.addEventListener('focus', bump);
+    return () => {
+      window.removeEventListener(orgStore.ORG_EVENT, bump);
+      window.removeEventListener('storage', bump);
+      window.removeEventListener('focus', bump);
+    };
+  }, []);
 
-  const loadNotifications = async () => {
-    setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setNotifications(MOCK_NOTIFICATIONS);
-      const unread = MOCK_NOTIFICATIONS.filter(n => !n.read).length;
-      setUnreadCount(unread);
-      setLoading(false);
-    }, 500);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- tick re-reads storage
+  const notifications = useMemo(() => buildNotifications(user), [user, tick]);
+  const unreadCount = notifications.filter((n) => !n.read).length;
+  const loading = false;
+
+  const update = (fn) => {
+    if (!user) return;
+    const st = readState(user.id);
+    fn(st);
+    saveState(user.id, st);
+    setTick((t) => t + 1);
   };
 
-  const markAsRead = async (notificationId) => {
-    setNotifications(prev => prev.map(n => 
-      n.id === notificationId ? { ...n, read: true } : n
-    ));
-    setUnreadCount(prev => Math.max(0, prev - 1));
-  };
+  const loadNotifications = async () => setTick((t) => t + 1);
 
-  const markAllAsRead = async () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    setUnreadCount(0);
-  };
+  const markAsRead = async (id) => update((st) => { if (!st.read.includes(id)) st.read.push(id); });
 
-  const acceptInvite = async (notification) => {
-    // Update notification status
-    setNotifications(prev => prev.map(n => 
-      n.id === notification.id ? { ...n, status: 'accepted', read: true } : n
-    ));
-    
-    // Here you would call API to accept the invite
-    console.log('Accepted invite:', notification);
-    
-    // Reload workspaces to show new workspace/project
-    window.location.reload();
-  };
+  const markAllAsRead = async () => update((st) => {
+    notifications.forEach((n) => { if (!st.read.includes(n.id)) st.read.push(n.id); });
+  });
 
-  const rejectInvite = async (notification) => {
-    setNotifications(prev => prev.map(n => 
-      n.id === notification.id ? { ...n, status: 'rejected', read: true } : n
-    ));
-    console.log('Rejected invite:', notification);
-  };
+  // Returns the orgStore result ({ success, orgId } / { success, error }).
+  const acceptInvite = async (n) => orgStore.acceptInvite(user, n.member_id);
+  const rejectInvite = async (n) => orgStore.declineInvite(user, n.member_id);
+  const acceptTransfer = async (n) => { markAsRead(n.id); return { success: true, orgId: n.workspace_id }; };
 
-  const acceptTransfer = async (notification) => {
-    setNotifications(prev => prev.map(n => 
-      n.id === notification.id ? { ...n, status: 'accepted', read: true } : n
-    ));
-    console.log('Accepted ownership transfer:', notification);
-    window.location.reload();
-  };
-
-  const deleteNotification = async (notificationId) => {
-    setNotifications(prev => prev.filter(n => n.id !== notificationId));
-    const remainingUnread = notifications.filter(n => n.id !== notificationId && !n.read).length;
-    setUnreadCount(remainingUnread);
-  };
+  const deleteNotification = async (id) => update((st) => { if (!st.dismissed.includes(id)) st.dismissed.push(id); });
 
   const value = {
     notifications,

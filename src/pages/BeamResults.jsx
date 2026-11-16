@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
+import { guardNavigation } from "../utils/unsavedGuard";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FiArrowLeft, FiFileText, FiDownload, FiChevronRight } from "react-icons/fi";
 import { exportElementToPdf } from "../utils/exportPdf";
@@ -9,6 +10,9 @@ import SpanBMD from "../components/results/SpanBMD";
 import { DIAGRAM } from "../components/results/diagramTheme";
 import { useDesignMeta } from "../contexts/DesignMetaContext";
 import DesignTopBar from "../components/results/DesignTopBar";
+import BeamDetailDrawing from "../components/results/BeamDetailDrawing";
+import BarShape from "../components/results/BarShape";
+import ReportSections from "../components/ReportSections";
 
 const DIM = "var(--dim)";
 const DIM_WRAP = "text-[#475569] dark:text-[#94a3b8] [--dim:#0A2F44] dark:[--dim:#66a4c2]";
@@ -21,7 +25,7 @@ const HEAD = "text-[13px] font-bold uppercase tracking-wide text-[#0A2F44] dark:
 const f = (v, d = 2) => (Number.isFinite(v) ? Number(v).toFixed(d) : "\u2014");
 const isPass = (s) => s === "PASS" || s === "OK";
 
-const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection"];
+const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection", "Detailing & Schedule"];
 
 // what each tab holds, for the cover page of its PDF
 const TAB_NOTES = {
@@ -29,6 +33,7 @@ const TAB_NOTES = {
   "Flexural Design": "the bending design in full: K, lever arm, tension and minimum steel, bars provided (EC2 6.1).",
   "Shear Design": "the shear design in full: resistance without links, links where needed (EC2 6.2).",
   "Deflection": "the span/depth deflection check in full (EC2 7.4.2).",
+  "Detailing & Schedule": "the reinforcement drawing (elevation and section), bar marks, end anchorage at the supports (EC2 9.2.1.4) and the bending / quantity schedule.",
 };
 
 export default function BeamResults() {
@@ -56,7 +61,7 @@ export default function BeamResults() {
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className={`${CARD} p-8 text-center max-w-md`}>
           <p className={`mb-4 ${MAIN}`}>No beam results. Run a beam design first.</p>
-          <button onClick={() => navigate("/beam")} className="rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
+          <button onClick={() => guardNavigation(() => navigate("/beam"))} className="rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
             Back to Input
           </button>
         </div>
@@ -117,7 +122,7 @@ export default function BeamResults() {
             <button onClick={() => setReportOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-[#0A2F44] dark:border-[#66a4c2] px-3 py-1.5 text-[12px] font-medium text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#e6f0f5] dark:hover:bg-[#1e3a4a]">
               <FiFileText size={14} /> Detailed Report (PDF)
             </button>
-            <button onClick={() => downloadPdf()} className="flex items-center gap-1.5 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#082636]">
+            <button data-pdf-download data-shortcut="pdf" onClick={() => downloadPdf()} className="flex items-center gap-1.5 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#082636]">
               <FiDownload size={14} /> Download Report
             </button>
           </div>
@@ -347,15 +352,17 @@ export default function BeamResults() {
           { title: "Flexural Design", node: <FlexuralTab ctx={ctx} /> },
           { title: "Shear Design", node: <ShearTab ctx={ctx} /> },
           { title: "Deflection", node: <DeflectionTab ctx={ctx} /> },
+          ...(data.detailing ? [{ title: "Detailing & Schedule", node: <DetailingTab det={data.detailing} report={report} /> }] : []),
         ]} />
         )}
 
         {tab === "Flexural Design" && <FlexuralTab ctx={ctx} />}
         {tab === "Shear Design" && <ShearTab ctx={ctx} />}
         {tab === "Deflection" && <DeflectionTab ctx={ctx} />}
+        {tab === "Detailing & Schedule" && <DetailingTab det={data.detailing} report={report} />}
 
         <div className="mt-6 flex items-center justify-between">
-          <button onClick={() => navigate("/beam")} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium ${SUB} hover:bg-[#e2e8f0] dark:hover:bg-[#334155]`}>
+          <button onClick={() => guardNavigation(() => navigate("/beam"))} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium ${SUB} hover:bg-[#e2e8f0] dark:hover:bg-[#334155]`}>
             <FiArrowLeft size={15} /> Back to Input
           </button>
         </div>
@@ -462,6 +469,82 @@ function DeflectionTab({ ctx }) {
       <Card n="" title="Deflected Shape">
         <DeflectedShapeSVG defl={sls.deflection_actual} span={summary.span} />
       </Card>
+    </div>
+  );
+}
+
+/* ---------- detailing & bar schedule (engine/beam_detailing.py) ---------- */
+function DetailingTab({ det, report }) {
+  if (!det) return <Card title="Detailing & Schedule"><p className={`text-sm ${SUB}`}>Run the design again to get the detailing and bar schedule.</p></Card>;
+  const dias = det.summary.by_diameter.map((e) => e.type_size);
+  const a = det.anchorage;
+  const ok = (v) => <span className={`rounded px-2 py-0.5 text-xs font-semibold ${v ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"}`}>{v ? "OK" : "NOT OK"}</span>;
+  return (
+    <div className="space-y-5">
+      {det.warnings.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+          {det.warnings.map((w, i) => <p key={i}>{w}</p>)}
+        </div>
+      )}
+      <Card title="Reinforcement Drawing">
+        <BeamDetailDrawing det={det} />
+      </Card>
+
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        <Card title="Bar Callouts (Drawing)">
+          <KV rows={det.schedule.map((r) => [
+            r.mark === "01" ? `Main bars (${r.position === "top" ? "top" : "bottom"})` : r.mark === "02" ? `Other bars (${r.position})` : "Links",
+            r.callout,
+          ])} />
+          <p className={`mt-2 text-xs ${SUB}`}>number - size - bar mark (- spacing in mm for links).</p>
+        </Card>
+        <Card title={a && a.cantilever ? "Anchorage at the Fixed End" : "Anchorage at the Supports (EC2 9.2.1.4)"}>
+          {!a && <p className={`text-sm ${SUB}`}>Not checked for this support condition (see the note above).</p>}
+          {a && a.cantilever && (
+            <KV rows={[
+              ["l_b,rqd at f_yd", `${f(a.lb_rqd_mm, 0)} mm`],
+              ["α1 / α2", `${a.alpha1} / ${a.alpha2}`],
+              ["l_bd into the support", `${a.into_support_mm} mm`],
+            ]} />
+          )}
+          {a && !a.cantilever && (
+            <>
+              <KV rows={[
+                ["F_E = V_Ed / 2 (cot θ = 1)", `${f(a.F_E_kN)} kN`],
+                ["σ_sd = F_E / A_s", `${f(a.sigma_s_MPa, 1)} MPa`],
+                ["f_bd", `${f(a.fbd_MPa, 3)} MPa`],
+                ["l_b,rqd / l_b,min", `${f(a.lb_rqd_mm, 0)} / ${f(a.lb_min_mm, 0)} mm`],
+                ["Straight l_bd vs in support", `${f(a.lbd_straight_mm, 0)} vs ${f(a.available_mm, 0)} mm`],
+                ...(a.straight_ok ? [] : [["Bent: α1 / α2 → l_bd", `${a.alpha1} / ${a.alpha2} → ${f(a.lbd_bent_mm, 0)} mm`], ["Leg (max)", `${a.leg_mm} mm (${a.leg_max_mm})`]]),
+              ]} />
+              <div className="mt-2 flex items-center justify-between text-[13px]"><span className={SUB}>Status</span>{ok(a.status === "OK")}</div>
+            </>
+          )}
+          <div className="mt-2 flex items-center justify-between text-[13px]">
+            <span className={SUB}>Clear gap between main bars {f(det.bar_gap_mm, 0)} mm (≥ {det.bar_gap_min_mm} mm, EC2 8.2)</span>{ok(det.spacing_ok)}
+          </div>
+        </Card>
+      </div>
+
+      <Card title="Reinforcement Bending / Quantity Schedule">
+        <div className="overflow-x-auto">
+          <Table
+            head={["S/No", "Mark", "Location", "Size", "No.", "Members", "Shape (mm)", "Code", "Length (m)", "Total (m)", ...dias.map((d) => `${d} (kg)`)]}
+            rows={[
+              ...det.schedule.map((b, i) => [
+                i + 1, b.mark, <span key="loc" className="inline-block w-36 whitespace-normal font-sans text-xs leading-snug">{b.description}</span>, b.type_size, b.n_bars, b.n_members,
+                <BarShape key={b.mark} code={b.shape_code} dims={b.dims_mm} />, b.shape_code, b.length_m.toFixed(3), b.total_length_m.toFixed(2),
+                ...dias.map((d) => (d === b.type_size ? b.mass_kg.toFixed(2) : "")),
+              ]),
+              ["", "", "", "", "", "", "", "", "", "TOTAL (kg)", ...det.summary.by_diameter.map((e) => e.mass_kg.toFixed(2))],
+              ["", "", "", "", "", "", "", "", "", "TOTAL (tonnes)", ...det.summary.by_diameter.map((e) => e.tonnes.toFixed(4))],
+              ["", "", "", "", "", "", "", "", "", "Pieces (12 m)", ...det.summary.by_diameter.map((e) => `${e.pieces_12m} pcs`)],
+            ]}
+          />
+        </div>
+        <p className={`mt-2 text-xs ${SUB}`}>Cut length = sum of the shape dimensions (BS 8666 bend deductions not applied). Total {det.summary.total_mass_kg} kg.</p>
+      </Card>
+      <ReportSections report={report} match={/Detailing/i} heading="Detailing and bar schedule — calculation" />
     </div>
   );
 }

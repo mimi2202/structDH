@@ -1,4 +1,4 @@
-// src/pages/Settings.jsx — app-wide preferences (renders inside MainLayout).
+// src/pages/Settings.jsx — app-wide preferences (renders inside AccountLayout).
 // Everything here is stored in this browser (utils/appSettings.js) and is
 // read by the input pages and the PDF cover; nothing is sent to the backend.
 import Dropdown from "../components/Dropdown";
@@ -39,7 +39,7 @@ export default function Settings() {
 
   const exportData = () => {
     const data = {
-      app: "SDH (Structural Design Hub)", exported_at: new Date().toISOString(), settings: s,
+      app: "SDH (Sphere Design Hub)", exported_at: new Date().toISOString(), settings: s,
       saved_designs: Object.fromEntries(Object.keys(ELEMENTS).map((el) => [el, listDesigns(el)])),
       load_sets: listLoadSets(),
     };

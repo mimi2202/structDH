@@ -81,7 +81,7 @@ def parse_fy(grade):
 
 def resolve_rates(rates_db, region):
     root = rates_db.get("regions", rates_db)
-    rb = root.get(region) or root.get("UK") or root.get("Nigeria") or {}
+    rb = root.get(region) or root.get("UK") or {}
     mats = rb.get("materials", rb)
     concrete = mats.get("concrete", {}) or {}
     steel = mats.get("steel") or mats.get("reinforcement") or {}
@@ -250,9 +250,48 @@ def calculate_slab_design(request: SlabDesignRequest) -> SlabDesignResult:
     """Bar size: the one given (bar_diameters[0]) or, with auto_bars, the
     lightest passing standard size (services/bar_selection.py)."""
     from services import bar_selection
-    return bar_selection.run(
+    result = bar_selection.run(
         request, _calculate_slab_design, lambda dia: {"bar_diameters": [dia]}, [10, 12, 16, 20],
         lambda r: r.summary.status, lambda r: r.cost_breakdown.steel["weight"], "steel weight (kg per m width)")
+    _attach_detailing(request, result)
+    return result
+
+
+def _attach_detailing(request: SlabDesignRequest, result: SlabDesignResult) -> None:
+    """Bar marks, schedule and drawing data for the designed panel
+    (engine/member_detailing.py); a report section is appended."""
+    from engine.member_detailing import slab_panel_detailing
+    from models.schemas import ReportRow
+    slab_type = _enum(request.slab_type)
+    cont = _enum(request.continuity)
+    g = request.geometry
+    common = dict(h=g.thickness, cover=result.summary.clear_cover, fck=parse_fck(request.materials.concrete_grade),
+                  fyk=parse_fy(request.materials.steel_grade), support_width_mm=request.support_width_mm,
+                  n_members=request.n_members)
+    if slab_type == "one_way":
+        if cont == "cantilever":
+            result.detailing = {"not_available": "Cantilever slabs: the main steel is at the top; detailing is not produced for this case yet."}
+            return
+        bs, ts = result.reinforcement.bottom_steel, result.reinforcement.top_steel
+        det = slab_panel_detailing(
+            slab_type="one_way", lx_mm=g.span_lx * 1000, ly_mm=g.span_ly * 1000 if g.span_ly else None,
+            bottom_x={"phi": float(bs["bar_diameter"]), "s": float(bs["spacing"])}, bottom_y=None,
+            top_x={"phi": float(ts["bar_diameter"]), "s": float(ts["spacing"])} if ts and ts.get("bar_diameter") else None, top_y=None,
+            x_cont_ends={"simply_supported": 0, "one_end_continuous": 1, "both_ends_continuous": 2}.get(cont, 0), y_cont_ends=0,
+            V_kN=float(result.design_forces.max_shear_force or 0), **common)
+    else:
+        tw = result.two_way or {}
+        loc = {l["key"]: l for l in tw.get("locations", [])}
+        bar = lambda k: {"phi": float(loc[k]["bar_diameter"]), "s": float(loc[k]["spacing"])} if k in loc and loc[k].get("bar_diameter") else None
+        det = slab_panel_detailing(
+            slab_type="two_way", lx_mm=g.span_lx * 1000, ly_mm=g.span_ly * 1000,
+            bottom_x=bar("x_pos"), bottom_y=bar("y_pos"), top_x=bar("x_neg"), top_y=bar("y_neg"),
+            x_cont_ends=int(tw.get("short_span_continuous_ends", 0)), y_cont_ends=int(tw.get("long_span_continuous_ends", 0)),
+            **common)
+    rows = det.pop("report_rows")
+    result.report.append(ReportSection(title="Detailing and Bar Schedule",
+                                       rows=[ReportRow(reference=x["ref"], calculation=x["calc"], output=x["out"]) for x in rows]))
+    result.detailing = det
 
 
 def _calculate_slab_design(request: SlabDesignRequest) -> SlabDesignResult:

@@ -577,7 +577,7 @@ const CreateWorkspace = () => {
         {/* Logo */}
         <div className="flex items-center justify-center mb-6">
           <div className="w-12 h-12 bg-[#0A2F44] rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-xl">SA</span>
+            <span className="text-white font-bold text-lg">SDH</span>
           </div>
         </div>
 
@@ -625,7 +625,7 @@ const CreateWorkspace = () => {
           <div className="py-12 flex flex-col items-center justify-center min-h-[400px]">
             <div className="relative mb-8">
               <div className="w-24 h-24 bg-[#0A2F44] rounded-2xl flex items-center justify-center animate-pulse">
-                <span className="text-white text-4xl font-bold">SA</span>
+                <span className="text-white text-4xl font-bold">SDH</span>
               </div>
               <div className="absolute -top-2 -right-2">
                 <FiLoader className="text-3xl text-[#0A2F44] animate-spin" />

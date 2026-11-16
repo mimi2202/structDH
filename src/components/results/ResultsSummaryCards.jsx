@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiCheckCircle, FiActivity, FiLayers, FiDollarSign, FiTrendingUp, FiAward } from 'react-icons/fi';
+import { FiCheckCircle, FiActivity, FiLayers, FiTrendingUp, FiAward } from 'react-icons/fi';
 
 const ResultsSummaryCards = ({ data }) => {
   const summary = data.designSummary;
@@ -28,14 +28,6 @@ const ResultsSummaryCards = ({ data }) => {
       icon: FiTrendingUp,
       color: summary.utilizationRatio <= 1.0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400',
       bg: summary.utilizationRatio <= 1.0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20',
-    },
-    {
-      title: 'Total Cost',
-      value: `₦${summary.totalCost.toLocaleString()}`,
-      subtitle: `Optimization Rank #${summary.optimizationRank}`,
-      icon: FiDollarSign,
-      color: 'text-yellow-600 dark:text-yellow-400',
-      bg: 'bg-yellow-50 dark:bg-yellow-900/20',
     },
   ];
 

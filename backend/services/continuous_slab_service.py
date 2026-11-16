@@ -6,7 +6,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'engine'))
 from models.schemas import (
     ContinuousSlabRequest, ContinuousSlabResult, DesignSummary, EnvelopeOut,
     SpanDesignOut, SupportDesignOut, DeflectionResult, ShearResult,
-    ComplianceCheck, CostBreakdown, DiagramOut, ReportSection,
+    ComplianceCheck, CostBreakdown, DiagramOut, ReportSection, ReportRow,
 )
 
 from services.report_front_matter import (
@@ -198,10 +198,26 @@ def _calculate_continuous_slab(request: ContinuousSlabRequest) -> ContinuousSlab
 
     report = _front_matter(request, res, compliance) + _build_report(request, res, dfc_rows, dfc_checks, overall)
 
+    # ---- detailing and bar schedule (engine/member_detailing.py)
+    from engine.member_detailing import continuous_slab_detailing
+    det = continuous_slab_detailing(
+        spans_mm=[L * 1000 for L in request.span_lengths], h=request.geometry_thickness, cover=summary.clear_cover,
+        spans=[{"phi": float(s.bar_diameter or 10), "s": float(s.spacing or 200)} for s in spans_out],
+        supports=[{"phi": float(s.bar_diameter or 0), "s": float(s.spacing or 0), "V_kN": float(s.shear or 0)} for s in supports_out],
+        end_fixed=[_enum(request.start_support) == "fixed", _enum(request.end_support) == "fixed"],
+        fck=float(res.fck), fyk=float(res.fyk),
+        slab_width_mm=request.slab_width_mm, support_width_mm=request.support_width_mm, n_members=request.n_members,
+    )
+    if det["status"] != "OK":
+        det["warnings"].append("Bottom bars at a simple end support need more anchorage than the support gives: see the anchorage rows.")
+    report.append(ReportSection(title="12. Detailing and Bar Schedule",
+                                rows=[ReportRow(reference=x["ref"], calculation=x["calc"], output=x["out"]) for x in det.pop("report_rows")]))
+
     return ContinuousSlabResult(
         task_id="completed", status="completed", summary=summary, envelope=envelope,
         spans=spans_out, supports=supports_out, deflection=deflection, shear=shear,
         compliance=compliance, cost_breakdown=cost_breakdown, diagram=diagram, report=report,
+        detailing=det,
     )
 
 

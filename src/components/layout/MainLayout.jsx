@@ -1,11 +1,11 @@
 // src/components/layout/MainLayout.jsx
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   FiGrid, FiLayers, FiBarChart2, FiColumns, FiSquare,
   FiTriangle, FiWind, FiDroplet, FiSettings, FiHelpCircle,
   FiSun, FiMoon, FiUser, FiLogOut, FiMenu, FiChevronLeft, FiChevronDown,
-  FiArrowLeft, FiBell, FiFolder
+  FiArrowLeft, FiBell, FiFolder, FiZap
 } from 'react-icons/fi';
 
 // Breadcrumb stages that are pages of their own; the first stage ("Slab
@@ -14,14 +14,15 @@ const CRUMB_PATHS = {
   'Continuous Slab': '/continuous-slab',
   'Simply Supported Beam': '/beam',
   'Continuous Beam': '/continuous-beam',
-  'Quick Design': '/new-design',
+  'Quick Design': '/quick-design',
+  'Projects': '/workspace/all/projects',
 };
-import { useAuth } from '../../contexts/AuthContext';
+import UserMenu from '../ui/UserMenu';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useDesignMeta } from '../../contexts/DesignMetaContext';
+import { quickDesignFor, currentProjectDesign, projectHubPath, DESIGN_MODE_EVENT } from '../../utils/designMode';
 
 const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisMethod, concreteGrade, steelGrade }) => {
-  const { user } = useAuth();
   const { isDarkMode, toggleDarkMode } = useTheme();
   const { designMeta } = useDesignMeta();
   const navigate = useNavigate();
@@ -39,8 +40,35 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
   const effectiveConcreteGrade = concreteGrade ?? designMeta.concreteGrade;
   const effectiveSteelGrade = steelGrade ?? designMeta.steelGrade;
 
+  // Re-render when a page below starts a project design (the project hub).
+  const [, setModeTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setModeTick((t) => t + 1);
+    window.addEventListener(DESIGN_MODE_EVENT, bump);
+    return () => window.removeEventListener(DESIGN_MODE_EVENT, bump);
+  }, []);
+
+  // Quick design (started from /quick-design): only this element and the way
+  // back are offered, not the whole element list.
+  const quick = quickDesignFor(location.pathname);
+  const ELEMENT_ICON = { slab: FiLayers, 'continuous-slab': FiLayers, beam: FiBarChart2, 'continuous-beam': FiBarChart2, column: FiColumns, pad: FiSquare, combined: FiSquare, staircase: FiTriangle };
+  const quickItems = quick && [
+    { id: 'quick-design', name: 'Quick Design', icon: FiZap, path: '/quick-design' },
+    { id: `quick-${quick.key}`, name: quick.label, icon: ELEMENT_ICON[quick.key] || FiLayers, path: quick.path, active: true },
+    { id: 'loads', name: 'Load Cases', icon: FiWind, path: '/load-cases' },
+    { id: 'materials', name: 'Materials', icon: FiDroplet, path: '/materials' },
+    { id: 'help', name: 'Help', icon: FiHelpCircle, path: '/help' },
+  ];
+
+  // Working for a project (opened from its design hub): the hub comes first and
+  // the header's back link returns to it.
+  const project = !quick && currentProjectDesign();
+  const hubPath = project && projectHubPath(project);
+  const onHub = !!project && location.pathname === hubPath;
+
   // Navigation items - Engineering Tools Only
-  const navItems = [
+  const allItems = [
+    ...(project ? [{ id: 'project-hub', name: project.name, sub: 'Project hub', icon: FiFolder, path: hubPath }] : []),
     {
       id: 'slab', name: 'Slab', icon: FiLayers, path: '/structural-input',
       children: [
@@ -52,19 +80,12 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
     { id: 'column', name: 'Column', icon: FiColumns, path: '/column-input' },
     { id: 'foundation', name: 'Foundation', icon: FiSquare, path: '/foundation-input' },
     { id: 'staircase', name: 'Staircase', icon: FiTriangle, path: '/staircase-design' },
-    { id: 'saved-designs', name: 'Saved Designs', icon: FiFolder, path: '/saved-designs' },
     { id: 'loads', name: 'Load Cases', icon: FiWind, path: '/load-cases' },
     { id: 'materials', name: 'Materials', icon: FiDroplet, path: '/materials' },
     { id: 'settings', name: 'Settings', icon: FiSettings, path: '/settings' },
     { id: 'help', name: 'Help', icon: FiHelpCircle, path: '/help' },
   ];
-
-  const getUserInitials = () => {
-    if (user?.name) {
-      return user.name.split(' ').map(n => n[0]).join('').toUpperCase();
-    }
-    return 'JE';
-  };
+  const navItems = quickItems || allItems;
 
   const handleBack = () => {
     navigate(-1);
@@ -95,21 +116,23 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
       >
         {/* Logo */}
         <div className={`p-5 border-b border-[#e5e7eb] dark:border-[#374151] ${isSidebarCollapsed ? 'px-3' : ''}`}>
-          <div className="flex items-center space-x-2">
+          <Link to="/dashboard" title="Dashboard" className="flex items-center space-x-2">
             <div className="w-10 h-10 bg-[#0A2F44] rounded-lg flex items-center justify-center flex-shrink-0">
               <span className="text-white font-bold text-sm">SDH</span>
             </div>
             {!isSidebarCollapsed && (
-              <span className="font-bold text-[#02090d] dark:text-white">Struct Design Hub</span>
+              <span className="font-bold text-[#02090d] dark:text-white">Sphere Design Hub</span>
             )}
-          </div>
+          </Link>
         </div>
 
         {/* Primary Navigation */}
         <nav className="flex-1 p-3 overflow-y-auto">
           <div className="space-y-1">
             {navItems.map((item) => {
-              const isActive = currentModule === item.id || location.pathname.includes(item.id);
+              const isActive = quick ? !!item.active
+                : item.id === 'project-hub' ? location.pathname === item.path
+                : (currentModule === item.id || location.pathname.includes(item.id));
               const hasChildren = !!item.children && !isSidebarCollapsed;
               const expanded = openMenus[item.id];
               return (
@@ -127,7 +150,9 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
                       title={isSidebarCollapsed ? item.name : ''}
                     >
                       <item.icon className={`text-xl flex-shrink-0 transition-colors ${isActive ? 'text-white' : 'group-hover:text-[#0A2F44] dark:group-hover:text-[#66a4c2]'}`} />
-                      {!isSidebarCollapsed && <span className="text-sm font-medium">{item.name}</span>}
+                      {!isSidebarCollapsed && (item.sub
+                        ? <span className="min-w-0"><span className="block text-[10px] font-semibold uppercase tracking-wider opacity-70">{item.sub}</span><span className="block truncate text-sm font-medium">{item.name}</span></span>
+                        : <span className="text-sm font-medium">{item.name}</span>)}
                     </Link>
                     {hasChildren && (
                       <button onClick={() => toggleMenu(item.id)} className="px-2 py-2.5" title="Toggle submenu">
@@ -201,9 +226,9 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
               <div className="p-5 border-b border-[#e5e7eb] dark:border-[#374151] flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <div className="w-8 h-8 bg-[#0A2F44] rounded-lg flex items-center justify-center">
-                    <span className="text-white font-bold text-sm">SA</span>
+                    <span className="text-white font-bold text-xs">SDH</span>
                   </div>
-                  <span className="font-bold text-[#02090d] dark:text-white">StructAI</span>
+                  <span className="font-bold text-[#02090d] dark:text-white">Sphere Design Hub</span>
                 </div>
                 <button onClick={() => setIsMobileMenuOpen(false)} className="p-1.5 hover:bg-[#f3f4f6] dark:hover:bg-[#374151] rounded-lg">
                   <FiChevronLeft className="text-lg text-[#6b7280]" />
@@ -259,9 +284,14 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
                 <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-1.5 rounded-lg hover:bg-[#f3f4f6] dark:hover:bg-[#374151] transition-colors cursor-pointer">
                   <FiMenu className="text-lg text-[#6b7280]" />
                 </button>
-                <button onClick={handleBack} className="flex items-center space-x-1 text-sm text-[#6b7280] dark:text-[#9ca3af] hover:text-[#0A2F44] transition-colors cursor-pointer">
+                <button
+                  onClick={quick ? () => navigate('/quick-design')
+                    : project ? () => (onHub ? navigate(`/workspace/${project.workspace_id || 'personal'}/projects/${project.id}`, { state: { from: 'hub' } }) : navigate(hubPath))
+                    : handleBack}
+                  title={quick ? 'Back to Quick Design' : project ? (onHub ? 'Project details, team and settings' : 'Back to the design hub') : 'Back'}
+                  className="flex items-center space-x-1 rounded px-1 text-sm text-[#6b7280] dark:text-[#9ca3af] hover:text-[#0A2F44] dark:hover:text-white transition-colors cursor-pointer">
                   <FiArrowLeft className="text-sm" />
-                  <span>Back to Project</span>
+                  <span>{quick ? 'Quick Design' : project ? (onHub ? `${project.name} · details` : `${project.name} · design hub`) : 'Back to Project'}</span>
                 </button>
                 {breadcrumb && (
                   <div className="hidden md:flex items-center space-x-2 text-sm">
@@ -283,9 +313,7 @@ const MainLayout = ({ children, currentModule, breadcrumb, designCode, analysisM
                 <button onClick={toggleDarkMode} className="p-1.5 rounded-lg hover:bg-[#f3f4f6] dark:hover:bg-[#374151] transition-colors cursor-pointer">
                   {isDarkMode ? <FiSun className="text-sm text-yellow-500" /> : <FiMoon className="text-sm text-[#0A2F44]" />}
                 </button>
-                <div className="w-7 h-7 bg-[#0A2F44] rounded-full flex items-center justify-center text-white text-xs font-medium">
-                  {getUserInitials()}
-                </div>
+                <UserMenu size="sm" />
               </div>
             </div>
           </div>

@@ -97,10 +97,10 @@ const Login = () => {
             className="w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4 transition-colors duration-300"
             style={{ backgroundColor: '#0A2F44' }}
           >
-            <span className="text-white text-2xl font-bold">SA</span>
+            <span className="text-white text-2xl font-bold">SDH</span>
           </div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Welcome to StructAI
+            Welcome to Sphere Design Hub
           </h1>
           <p className="mt-2" style={{ color: 'var(--text-secondary)' }}>
             Sign in to continue to your dashboard

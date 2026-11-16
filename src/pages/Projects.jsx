@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   FiFolder,
   FiPlus,
@@ -11,22 +11,33 @@ import {
   FiCheck,
 } from 'react-icons/fi'
 import { useWorkspace } from '../contexts/WorkspaceContext'
-import { mockProjects } from './Dashboard'
+import Dropdown from '../components/Dropdown'
+import { PERSONAL_WS, ALL_WS, projectWsId } from '../utils/projects'
 
 const Projects = () => {
   const { workspaceId } = useParams()
-  const { workspaces, loadWorkspaces } = useWorkspace()
+  const navigate = useNavigate()
+  const { workspaces, loadWorkspaces, listUserProjects } = useWorkspace()
   const [searchTerm, setSearchTerm] = useState('')
   const [filter, setFilter] = useState('all')
   const [viewMode, setViewMode] = useState('grid')
-  const [allProjects, setAllProjects] = useState([])
   const [isFilterOpen, setIsFilterOpen] = useState(false)
 
-  // Use the same mock data as dashboard
   useEffect(() => {
-    setAllProjects(mockProjects)
     loadWorkspaces()
   }, [])
+
+  // Which projects: all of them, personal only, or one organisation's (the
+  // URL's workspace id: "all", "personal" or an organisation id).
+  const scope = workspaceId || ALL_WS
+  const allProjects = listUserProjects(scope).filter((p) => p.status !== 'archived')
+    .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))
+  const scopeOptions = [
+    { value: ALL_WS, label: 'All projects' },
+    { value: PERSONAL_WS, label: 'Personal' },
+    ...workspaces.map((w) => ({ value: w.id, label: w.name })),
+  ]
+  const newProjectPath = `/workspace/${scope === ALL_WS ? PERSONAL_WS : scope}/projects/new`
 
   const projectTypes = [
     { value: 'all', label: 'All Types', icon: null, description: 'Show all project types' },
@@ -82,7 +93,7 @@ const Projects = () => {
               </p>
             </div>
             <Link
-              to="/workspace/create"
+              to={newProjectPath}
               className="flex items-center justify-center space-x-2 bg-[#0A2F44] text-white px-4 py-2 rounded-lg hover:bg-[#082636] transition-colors"
             >
               <FiPlus />
@@ -105,6 +116,15 @@ const Projects = () => {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 rounded-lg border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#1f2937] text-[#02090d] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0A2F44] transition-all"
+              />
+            </div>
+
+            {/* Personal / organisation */}
+            <div className="min-w-[180px]">
+              <Dropdown
+                value={scope}
+                onChange={(v) => navigate(`/workspace/${v}/projects`, { replace: true })}
+                options={scopeOptions}
               />
             </div>
 
@@ -207,7 +227,7 @@ const Projects = () => {
             </p>
             {!searchTerm && filter === 'all' && (
               <Link
-                to="/workspace/create"
+                to={newProjectPath}
                 className="inline-flex items-center space-x-2 bg-[#0A2F44] text-white px-6 py-3 rounded-lg hover:bg-[#082636] transition-colors"
               >
                 <FiPlus />
@@ -220,7 +240,7 @@ const Projects = () => {
             {filteredProjects.map((project) => (
               <Link
                 key={project.id}
-                to={`/workspace/${project.workspace_id}/projects/${project.id}`}
+                to={`/workspace/${projectWsId(project)}/projects/${project.id}/design`}
                 className="bg-white dark:bg-[#1f2937] rounded-xl shadow-lg border border-[#e5e7eb] dark:border-[#374151] p-6 hover:shadow-xl transition-all group"
               >
                 <div className="flex items-start justify-between mb-4">
@@ -254,7 +274,7 @@ const Projects = () => {
 
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-[#0A2F44] dark:text-[#cce1eb] font-medium">
-                    {project.design_standard || 'Eurocode'}
+                    {project.organisation_name || 'Personal'}
                   </span>
                   <span className="text-xs text-[#9ca3af]">
                     {new Date(project.updated_at).toLocaleDateString()}
@@ -279,6 +299,9 @@ const Projects = () => {
                     Type
                   </th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">
+                    Organisation
+                  </th>
+                  <th className="text-left px-6 py-3 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">
                     Location
                   </th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-[#6b7280] dark:text-[#9ca3af] uppercase tracking-wider">
@@ -290,9 +313,7 @@ const Projects = () => {
                 {filteredProjects.map((project) => (
                   <tr
                     key={project.id}
-                    onClick={() =>
-                      (window.location.href = `/workspace/${project.workspace_id}/projects/${project.id}`)
-                    }
+                    onClick={() => navigate(`/workspace/${projectWsId(project)}/projects/${project.id}/design`)}
                     className="hover:bg-[#f9fafb] dark:hover:bg-[#374151] cursor-pointer transition-colors"
                   >
                     <td className="px-6 py-4">
@@ -317,6 +338,9 @@ const Projects = () => {
                       >
                         {project.project_type}
                       </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-[#6b7280] dark:text-[#9ca3af]">
+                      {project.organisation_name || 'Personal'}
                     </td>
                     <td className="px-6 py-4 text-sm text-[#6b7280] dark:text-[#9ca3af]">
                       {project.location || '—'}

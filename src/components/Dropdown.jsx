@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { FiChevronDown, FiCheck } from "react-icons/fi";
 
 /**
- * Custom dropdown matching the Struct Design Hub palette (light + dark).
+ * Custom dropdown matching the Sphere Design Hub palette (light + dark).
  *
  * Props:
  *   value     - current value (string | number)

@@ -23,7 +23,7 @@ const SDHAgentDownload = () => {
               <FiDownload className="text-white text-3xl" />
             </div>
             <h1 className="text-2xl font-bold text-[#02090d] dark:text-white">Download SDH Agent</h1>
-            <p className="text-[#6b7280] dark:text-[#9ca3af] mt-2">Connect StructAI with your external design tools</p>
+            <p className="text-[#6b7280] dark:text-[#9ca3af] mt-2">Connect Sphere Design Hub with your external design tools</p>
           </div>
           
           <div className="space-y-4">
@@ -57,7 +57,7 @@ const SDHAgentDownload = () => {
                   <li>Download the SDH Agent for your operating system</li>
                   <li>Run the installer and follow the setup wizard</li>
                   <li>Launch SDH Agent from your applications</li>
-                  <li>Return to StructAI and click "Check Status"</li>
+                  <li>Return to Sphere Design Hub and click "Check Status"</li>
                 </ol>
               </div>
             </div>

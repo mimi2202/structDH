@@ -303,6 +303,10 @@ const StructuralInput = () => {
                       +5 mm fixing tolerance (fixed) &rarr; detail at {(parseFloat(formData.clearCover) || 0) + 5} mm
                     </p>
                   </div>
+                  {!twoWay && (
+                    <Field label="Slab Width (for the schedule)" unit="mm" value={formData.spanLy} onChange={(v) => set({ spanLy: v })} step="100" />
+                  )}
+                  <Field label="Support Width (wall / beam)" unit="mm" value={formData.supportWidth ?? "230"} onChange={(v) => set({ supportWidth: v })} step="10" />
                   <div>
                     <label className={LABEL}>Main Bar &Oslash; <span className="text-[#94a3b8]">(mm)</span></label>
                     <Dropdown value={formData.mainBarDia} onChange={(e) => set({ mainBarDia: e.target.value })} options={MAIN_BARS} />
@@ -475,7 +479,7 @@ const StructuralInput = () => {
         {/* footer actions */}
         <div className="border-t border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1f2937] px-6 py-4">
           <div className="flex items-center justify-end gap-3">
-            <button onClick={handleOptimise} disabled={isOptimising} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-5 py-2 text-sm font-medium text-white shadow-md hover:bg-[#082636] transition-colors disabled:opacity-50">
+            <button data-shortcut="run" title="Run the design (Ctrl+Enter)" onClick={handleOptimise} disabled={isOptimising} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-5 py-2 text-sm font-medium text-white shadow-md hover:bg-[#082636] transition-colors disabled:opacity-50">
               {isOptimising ? <FiLoader className="animate-spin" size={15} /> : null}
               {isOptimising ? "Optimising…" : "Proceed to Design"} <FiArrowRight size={15} />
             </button>
@@ -526,7 +530,7 @@ function TopBar({ twoWay, onReset }) {
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#0A2F44] text-white"><FiHome size={15} /></div>
-          <span className={`text-sm font-bold ${MAIN}`}>Struct Design Hub</span>
+          <span className={`text-sm font-bold ${MAIN}`}>Sphere Design Hub</span>
         </div>
         <Crumbs items={[
           { label: "Slab Design", to: "/structural-input" },

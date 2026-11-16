@@ -5,12 +5,15 @@
 //   interaction_x[], interaction_y[], failed_checks[], report[]
 // Report rows are { reference, calculation, output }.
 import Dropdown from "../components/Dropdown";
+import { guardNavigation } from "../utils/unsavedGuard";
 import React, { useState, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { exportElementToPdf } from "../utils/exportPdf";
 import { buildCoverHtml } from "../utils/reportCover";
 import FullDocument from "../components/results/FullDocument";
+import DetailingSchedule from "../components/results/DetailingSchedule";
+import MemberDetailDrawing from "../components/results/MemberDetailDrawing";
 import { DIAGRAM } from "../components/results/diagramTheme";
 import DesignTopBar from "../components/results/DesignTopBar";
 import {
@@ -41,6 +44,7 @@ const TAB_COVER = {
   interaction: ["Interaction", "the N-M interaction diagram for the section with the design actions plotted."],
   levels: ["Per level", "axial load, moments, slenderness and utilisation at every storey."],
   checks: ["Checks", "each code check in full for the selected storey (EC2 5.8, 6.1, 9.5)."],
+  detailing: ["Detailing & Schedule", "the reinforcement drawing per storey (laps, link zones, cross-ties), bar marks and the bending / quantity schedule."],
 };
 
 export default function ColumnResults() {
@@ -60,7 +64,7 @@ export default function ColumnResults() {
         <div className={`${CARD} max-w-md p-8 text-center`}>
           <FiAlertTriangle className="mx-auto mb-3 text-amber-500" size={28} />
           <p className={`mb-4 ${MAIN}`}>No design results. Run a column design first.</p>
-          <button onClick={() => navigate("/column-input")}
+          <button onClick={() => guardNavigation(() => navigate("/column-input"))}
             className="rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
             Go to Column Input
           </button>
@@ -104,7 +108,7 @@ export default function ColumnResults() {
         menu={[["Detailed report", () => setShowReport(true)]]} />
       <div ref={sheetRef} className="w-full space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <button onClick={() => navigate("/column-input")} className={`flex items-center gap-2 text-sm ${SUB}`}>
+          <button onClick={() => guardNavigation(() => navigate("/column-input"))} className={`flex items-center gap-2 text-sm ${SUB}`}>
             <FiArrowLeft size={16} /> Back to Input
           </button>
           <div className="flex gap-2">
@@ -112,7 +116,7 @@ export default function ColumnResults() {
               className="flex items-center gap-2 rounded-lg border border-[#e2e8f0] px-4 py-2 text-sm text-[#0A2F44] hover:bg-[#f1f5f9] dark:border-[#334155] dark:text-[#66a4c2] dark:hover:bg-[#334155]">
               <FiFileText size={15} /> Detailed Report
             </button>
-            <button onClick={() => exportElementToPdf(sheetRef.current, `Column-${s.column_id}-${TAB_COVER[tab][0]}`, buildCoverHtml({
+            <button data-pdf-download data-shortcut="pdf" onClick={() => exportElementToPdf(sheetRef.current, `Column-${s.column_id}-${TAB_COVER[tab][0]}`, buildCoverHtml({
                 element: `${s.column_type ? s.column_type[0].toUpperCase() + s.column_type.slice(1) + " " : ""}Column`,
                 member: s.column_id, section: TAB_COVER[tab][0], sectionNote: TAB_COVER[tab][1],
                 description: `Reinforced concrete column (${s.braced ? "braced" : "unbraced"}, ${s.end_condition || "end conditions as entered"}) designed to BS EN 1992-1-1, including slenderness and second-order effects.`,
@@ -192,7 +196,7 @@ export default function ColumnResults() {
 
         <div className="flex gap-6 overflow-x-auto border-b border-[#e2e8f0] dark:border-[#334155]">
           {[["overview", "Overview"], ["interaction", "Interaction"],
-            ["levels", "Per level"], ["checks", "Checks"]].map(([k, label]) => (
+            ["levels", "Per level"], ["checks", "Checks"], ["detailing", "Detailing & Schedule"]].map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)}
               className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-2.5 text-[12px] font-semibold uppercase tracking-wide transition-colors ${
                 tab === k ? "border-[#0A2F44] text-[#0A2F44] dark:border-[#66a4c2] dark:text-[#66a4c2]"
@@ -210,6 +214,7 @@ export default function ColumnResults() {
             { title: "Per Level", node: <LevelsTab r={r} isBiaxial={isBiaxial} /> },
             { title: "Code Checks", node: <ChecksTab r={r} levels={levels} shown={shown} shownIdx={shownIdx}
                 setLevelIdx={setLevelIdx} varies={varies} /> },
+            ...(r.bar_detailing ? [{ title: "Detailing & Schedule", node: <DetailingSchedule det={r.bar_detailing} report={r.report} drawing={<MemberDetailDrawing det={r.bar_detailing} />} /> }] : []),
           ]} />
         )}
         {tab === "interaction" && (
@@ -217,6 +222,7 @@ export default function ColumnResults() {
             setLevelIdx={setLevelIdx} isBiaxial={isBiaxial} varies={varies} />
         )}
         {tab === "levels" && <LevelsTab r={r} isBiaxial={isBiaxial} />}
+        {tab === "detailing" && <DetailingSchedule det={r.bar_detailing} report={r.report} drawing={r.bar_detailing && <MemberDetailDrawing det={r.bar_detailing} />} />}
         {tab === "checks" && (
           <ChecksTab r={r} levels={levels} shown={shown} shownIdx={shownIdx}
             setLevelIdx={setLevelIdx} varies={varies} />

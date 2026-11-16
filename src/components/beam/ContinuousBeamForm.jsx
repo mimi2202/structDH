@@ -35,7 +35,6 @@ const DEFAULTS = {
   endSupport: "simple",
   designWorkingLife: "50", exposureClass: "XC1", crackedSectionSls: true,
   notes: "",
-  region: "Nigeria",
 };
 
 const ContinuousBeamForm = ({ showHeader = true }) => {

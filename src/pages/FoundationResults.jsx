@@ -1,11 +1,13 @@
 // src/pages/FoundationResults.jsx
 import React, { useState, useRef } from "react";
+import { guardNavigation } from "../utils/unsavedGuard";
 import { exportElementToPdf } from "../utils/exportPdf";
 import { buildCoverHtml } from "../utils/reportCover";
 import ReportSections from "../components/ReportSections";
 import FullDocument from "../components/results/FullDocument";
 import DesignTopBar from "../components/results/DesignTopBar";
 import FootingDetailDrawing from "../components/results/FootingDetailDrawing";
+import BarShape from "../components/results/BarShape";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FiArrowLeft, FiCheckCircle, FiXCircle, FiFileText, FiX, FiAlertTriangle, FiDownload } from "react-icons/fi";
 import Plot from "react-plotly.js";
@@ -52,7 +54,7 @@ export default function FoundationResults() {
         <div className={`${CARD} p-8 text-center max-w-md`}>
           <FiAlertTriangle className="mx-auto mb-3 text-amber-500" size={28} />
           <p className={`mb-4 ${MAIN}`}>No design results. Run a foundation design first.</p>
-          <button onClick={() => navigate("/foundation-input")} className="rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
+          <button onClick={() => guardNavigation(() => navigate("/foundation-input"))} className="rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
             Go to Foundation Input
           </button>
         </div>
@@ -185,14 +187,14 @@ export default function FoundationResults() {
       <div ref={sheetRef} className="w-full space-y-5">
         {/* header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <button onClick={() => navigate("/foundation-input")} className={`flex items-center gap-2 text-sm ${SUB}`}>
+          <button onClick={() => guardNavigation(() => navigate("/foundation-input"))} className={`flex items-center gap-2 text-sm ${SUB}`}>
             <FiArrowLeft size={16} /> Back to Input
           </button>
           <div className="flex items-center gap-3">
             <button onClick={() => setShowReport(true)} className="flex items-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-4 py-2 text-sm text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#f1f5f9] dark:hover:bg-[#334155]">
               <FiFileText size={15} /> Detailed Report
             </button>
-            <button onClick={() => exportElementToPdf(sheetRef.current, `PadFoundation-${tab}`, footingCover(r, meta, tab, "Pad Footing", [
+            <button data-pdf-download data-shortcut="pdf" onClick={() => exportElementToPdf(sheetRef.current, `PadFoundation-${tab}`, footingCover(r, meta, tab, "Pad Footing", [
                 ["Footing", `${g.footing_length_mm} × ${g.footing_width_mm} × ${g.footing_depth_mm} mm`],
                 ["Column", g.column_shape === "circular" ? `Ø${g.column_x_mm} mm` : `${g.column_x_mm} × ${g.column_y_mm} mm`],
                 ["Materials", [meta.concrete_grade, meta.steel_grade].filter(Boolean).join(", ")],
@@ -439,14 +441,14 @@ function CombinedFootingResults({ r, meta, navigate, sheetRef, showReport, setSh
         name={`Combined footing ${g.footing_length_mm} × ${g.footing_width_mm} × ${g.footing_depth_mm} mm`} />
       <div ref={sheetRef} className="w-full space-y-5">
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <button onClick={() => navigate("/foundation-input")} className={`flex items-center gap-2 text-sm ${SUB}`}>
+          <button onClick={() => guardNavigation(() => navigate("/foundation-input"))} className={`flex items-center gap-2 text-sm ${SUB}`}>
             <FiArrowLeft size={16} /> Back to Input
           </button>
           <div className="flex items-center gap-3">
             <button onClick={() => setShowReport(true)} className="flex items-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-4 py-2 text-sm text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#f1f5f9] dark:hover:bg-[#334155]">
               <FiFileText size={15} /> Detailed Report
             </button>
-            <button onClick={() => exportElementToPdf(sheetRef.current, `CombinedFooting-${tab}`, footingCover(r, meta, tab, "Combined Footing", [
+            <button data-pdf-download data-shortcut="pdf" onClick={() => exportElementToPdf(sheetRef.current, `CombinedFooting-${tab}`, footingCover(r, meta, tab, "Combined Footing", [
                 ["Footing", `${g.footing_length_mm} × ${g.footing_width_mm} × ${g.footing_depth_mm} mm`],
                 ["Columns", `${col.column_1.axial_load_kN} kN and ${col.column_2.axial_load_kN} kN, ${col.spacing_m} m apart`],
                 ["Materials", [meta.concrete_grade, meta.steel_grade].filter(Boolean).join(", ")],
@@ -656,43 +658,6 @@ function Chip({ label, pct, ok }) {
 }
 
 /* ---------- detailing & bar schedule (Structville 9.10, 10.2) ---------- */
-function BarShape({ code, dims }) {
-  // shape 21: U-bar (A leg, B straight, C leg); 11: L-bar (A vertical, B foot);
-  // 51: closed link (A x B, C hooks). Drawn large enough to read in the PDF.
-  const stroke = "currentColor";
-  const lab = { fontSize: 12, fill: "#475569" };
-  const cls = "text-[#c0392b] dark:text-[#f87171]";
-  if (code === "21") {
-    return (
-      <svg width="230" height="70" viewBox="0 0 230 70" className={cls}>
-        <polyline points="44,8 44,42 186,42 186,8" fill="none" stroke={stroke} strokeWidth="3" strokeLinejoin="round" />
-        <text x="38" y="30" textAnchor="end" {...lab}>{dims.A}</text>
-        <text x="115" y="60" textAnchor="middle" {...lab}>{dims.B}</text>
-        <text x="192" y="30" {...lab}>{dims.C}</text>
-      </svg>
-    );
-  }
-  if (code === "51") {
-    return (
-      <svg width="230" height="84" viewBox="0 0 230 84" className={cls}>
-        <rect x="80" y="10" width="62" height="54" rx="5" fill="none" stroke={stroke} strokeWidth="3" />
-        <polyline points="124,10 142,10 142,28" fill="none" stroke={stroke} strokeWidth="3" />
-        <line x1="128" y1="12" x2="114" y2="26" stroke={stroke} strokeWidth="3" strokeLinecap="round" />
-        <line x1="140" y1="24" x2="126" y2="38" stroke={stroke} strokeWidth="3" strokeLinecap="round" />
-        <text x="111" y="79" textAnchor="middle" {...lab}>{dims.A}</text>
-        <text x="74" y="41" textAnchor="end" {...lab}>{dims.B}</text>
-        <text x="150" y="41" {...lab}>hooks {dims.C}</text>
-      </svg>
-    );
-  }
-  return (
-    <svg width="230" height="70" viewBox="0 0 230 70" className={cls}>
-      <polyline points="60,6 60,42 150,42" fill="none" stroke={stroke} strokeWidth="3" strokeLinejoin="round" />
-      <text x="54" y="28" textAnchor="end" {...lab}>{dims.A}</text>
-      <text x="105" y="60" textAnchor="middle" {...lab}>{dims.B}</text>
-    </svg>
-  );
-}
 
 function DetailingTab({ det, report }) {
   if (!det) return <Panel title="Detailing & Schedule"><p className={`text-sm ${SUB}`}>Run the design again to get the detailing and bar schedule.</p></Panel>;

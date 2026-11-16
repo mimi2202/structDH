@@ -1,8 +1,11 @@
 // src/pages/StructuralResults.jsx
 import React, { useRef, useState } from "react";
+import { guardNavigation } from "../utils/unsavedGuard";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import DetailedReport from "../components/DetailedReport";
 import FullDocument from "../components/results/FullDocument";
+import DetailingSchedule from "../components/results/DetailingSchedule";
+import MemberDetailDrawing from "../components/results/MemberDetailDrawing";
 import { DIAGRAM } from "../components/results/diagramTheme";
 import SpanBMD from "../components/results/SpanBMD";
 import { exportElementToPdf } from "../utils/exportPdf";
@@ -26,7 +29,7 @@ const TXT_SUB = "text-[#64748b] dark:text-[#94a3b8]";
 const ACCENT = "text-[#0A2F44] dark:text-[#66a4c2]";
 const ROW_BORDER = "border-[#f1f5f9] dark:border-[#1f2937]";
 
-const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection", "Reinforcement Summary"];
+const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection", "Reinforcement Summary", "Detailing & Schedule"];
 // what each tab holds, for the cover page of its PDF
 const TAB_NOTES = {
   "Overview": "the complete design document: summary, flexural, shear, deflection and reinforcement sections in full, and the full calculation report, numbered.",
@@ -34,6 +37,7 @@ const TAB_NOTES = {
   "Shear Design": "the shear check against the resistance without shear reinforcement (EC2 6.2.2).",
   "Deflection": "the span/depth deflection check in full (EC2 7.4.2).",
   "Reinforcement Summary": "the bars provided in each direction, with spacing and area.",
+  "Detailing & Schedule": "the reinforcement drawing, bar marks and callouts, anchorage at simple supports and the bending / quantity schedule.",
 };
 
 /* ================================================================== */
@@ -41,7 +45,6 @@ const TAB_NOTES = {
 /* ================================================================== */
 const f = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "—");
 const num = (v, d = 2) => (typeof v === "number" ? v.toFixed(d) : "0");
-const fmtCur = (v) => v?.toLocaleString("en-NG", { maximumFractionDigits: 2 }) ?? "0";
 
 function parseNum(str, re) {
   const m = String(str || "").match(re);
@@ -133,14 +136,16 @@ const StructuralResults = () => {
   // have workspace/project context, otherwise just go back to wherever we came from.
   const goToInput = () => {
     if (workspaceId && projectId) {
-      navigate(`/workspace/${workspaceId}/projects/${projectId}/slab-input`);
+      guardNavigation(() => navigate(`/workspace/${workspaceId}/projects/${projectId}/slab-input`));
     } else {
-      navigate(-1);
+      guardNavigation(() => navigate(-1));
     }
   };
 
   const originalFormData = location.state?.formData;
   const rawData = liveResult || location.state?.designResult;
+  // cantilever slabs (and results saved before detailing existed) have no detailing tab
+  const hasDetailing = !!rawData?.detailing && !rawData.detailing.not_available;
 
   const handleIncreaseThickness = async (newThicknessMm) => {
     if (!originalFormData) {
@@ -182,21 +187,21 @@ const StructuralResults = () => {
   const defl = rawData.deflection || {};
   const shear = rawData.shear || {};
   const compliance = rawData.compliance || [];
-  const cost = rawData.cost_breakdown || {};
   const warnings = rawData.warnings || [];
   const D = deriveEC2({ summary, forces, reinf, shear, defl });
   const isPass = summary.status === "PASS" || !summary.status;
 
   const tw = rawData.two_way || null;              // two-way: coefficients, 4 moments, steel per location
   const lc = rawData.load_combination || null;     // EN 1990 6.10 leading / accompanying
-  const ctx = { summary, forces, reinf, defl, shear, compliance, cost, D, isPass, tw, lc };
+  const ctx = { summary, forces, reinf, defl, shear, compliance, D, isPass, tw, lc };
 
   // Save / Open live in the top bar (components/results/DesignTopBar.jsx)
   const saveCurrent = () => barRef.current?.save();
 
   // Export: the results and the calculation trace as a CSV for Excel
   const exportResults = () => downloadCsv(`Slab-${summary.slab_type || "results"}`, [
-    { title: "Summary", rows: objectRows(summary) },
+    // cost is left out of the app for now (the backend still returns it)
+    { title: "Summary", rows: objectRows(summary).filter((r) => !/cost|optimization rank/i.test(r[0])) },
     { title: "Design forces", rows: objectRows(forces) },
     { title: "Reinforcement", rows: objectRows(reinf) },
     { title: "Deflection", rows: objectRows(defl) },
@@ -250,7 +255,7 @@ const StructuralResults = () => {
           </div>
           <div className="flex gap-2">
             <button onClick={() => setReportOpen(true)} className={`flex items-center gap-1.5 rounded-lg border border-[#e2e8f0] dark:border-[#1f2937] bg-white dark:bg-[#0f172a] px-3 py-1.5 text-[13px] font-medium ${TXT_MAIN} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}><FiFileText size={15} /> Detailed Report</button>
-            <button onClick={downloadPdf} className="flex items-center gap-1.5 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[#082636] transition-colors">
+            <button data-pdf-download data-shortcut="pdf" onClick={downloadPdf} className="flex items-center gap-1.5 rounded-lg bg-[#0A2F44] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[#082636] transition-colors">
               <FiDownload size={15} /> Download Report
             </button>
           </div>
@@ -285,7 +290,7 @@ const StructuralResults = () => {
 
         {/* tabs */}
         <div className="mb-5 flex gap-6 overflow-x-auto border-b border-[#e2e8f0] dark:border-[#1f2937]">
-          {TABS.map((t) => (
+          {TABS.filter((t) => t !== "Detailing & Schedule" || hasDetailing).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-2.5 text-[12px] font-semibold uppercase tracking-wide transition-colors ${
                 tab === t ? "border-[#0A2F44] dark:border-[#66a4c2] text-[#0A2F44] dark:text-[#66a4c2]"
@@ -302,12 +307,14 @@ const StructuralResults = () => {
             { title: "Shear Design", node: <ShearTab ctx={ctx} /> },
             { title: "Deflection", node: <DeflectionTab ctx={ctx} /> },
             { title: "Reinforcement Summary", node: <ReinforcementTab ctx={ctx} /> },
+            ...(hasDetailing ? [{ title: "Detailing & Schedule", node: <DetailingSchedule det={rawData.detailing} report={rawData.report} drawing={<MemberDetailDrawing det={rawData.detailing} />} /> }] : []),
           ]} />
         )}
         {tab === "Flexural Design" && <FlexuralTab ctx={ctx} />}
         {tab === "Shear Design" && <ShearTab ctx={ctx} />}
         {tab === "Deflection" && <DeflectionTab ctx={ctx} />}
         {tab === "Reinforcement Summary" && <ReinforcementTab ctx={ctx} />}
+        {tab === "Detailing & Schedule" && hasDetailing && <DetailingSchedule det={rawData.detailing} report={rawData.report} drawing={<MemberDetailDrawing det={rawData.detailing} />} />}
 
         {/* footer */}
         <div className="mt-5 flex items-center justify-between border-t border-[#e2e8f0] dark:border-[#1f2937] pt-4">
@@ -347,7 +354,7 @@ const StructuralResults = () => {
 /*  TABS                                                              */
 /* ================================================================== */
 function OverviewTab({ ctx }) {
-  const { summary, forces, reinf, defl, shear, compliance, cost, isPass, tw, lc } = ctx;
+  const { summary, forces, reinf, defl, shear, compliance, isPass, tw, lc } = ctx;
   return (
     <>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -372,7 +379,6 @@ function OverviewTab({ ctx }) {
         </div>
         <div className="space-y-4">
           <DesignInputCard summary={summary} forces={forces} />
-          <CostCard cost={cost} />
         </div>
       </div>
     </>
@@ -810,18 +816,6 @@ function DesignInputCard({ summary, forces }) {
       <Row label="Ultimate Load" value={`${num(forces.ultimate_load)} kN/m²`} />
       <Row label="Design Code" value="EN 1992-1-1 (EC2)" />
       <Row label="Analysis Method" value="Limit State Method" />
-    </Card>
-  );
-}
-
-function CostCard({ cost }) {
-  return (
-    <Card number="9" title="Cost Summary">
-      <Row label="Concrete" value={`₦${fmtCur(cost.concrete?.cost)}`} />
-      <Row label="Steel" value={`₦${fmtCur(cost.steel?.cost)}`} />
-      <Row label="Formwork" value={`₦${fmtCur(cost.formwork?.cost)}`} />
-      <Row label="Total Cost" value={`₦${fmtCur(cost.total)}`} bold />
-      <Row label="Per m²" value={`₦${fmtCur(cost.total_per_sqm)}`} />
     </Card>
   );
 }

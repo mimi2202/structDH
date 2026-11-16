@@ -21,7 +21,6 @@ const NotificationBell = () => {
     markAllAsRead,
     acceptInvite,
     rejectInvite,
-    acceptTransfer,
     deleteNotification,
   } = useNotifications()
   const [isOpen, setIsOpen] = useState(false)
@@ -44,6 +43,8 @@ const NotificationBell = () => {
         return <FiUserPlus className="text-blue-500" />
       case 'transfer':
         return <FiShield className="text-purple-500" />
+      case 'role':
+        return <FiShield className="text-blue-500" />
       case 'member_joined':
         return <FiUserPlus className="text-green-500" />
       default:
@@ -65,37 +66,26 @@ const NotificationBell = () => {
     return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
   }
 
+  // Invitations open the Organisations page (Accept / Decline there or below);
+  // everything else opens the organisation it is about.
   const handleNotificationClick = (notification) => {
     markAsRead(notification.id)
-
-    if (notification.type === 'invite') {
-      // Show modal or handle inline
-      if (
-        window.confirm(
-          `Accept invitation to ${notification.workspace_name || notification.project_name} as ${notification.role}?`
-        )
-      ) {
-        acceptInvite(notification)
-      } else {
-        rejectInvite(notification)
-      }
-    } else if (notification.type === 'transfer') {
-      if (window.confirm(`Accept ownership transfer of "${notification.workspace_name}"?`)) {
-        acceptTransfer(notification)
-      }
-    } else {
-      // Navigate to relevant page
-      if (notification.workspace_id) {
-        navigate(`/workspace/${notification.workspace_id}`)
-      }
-    }
+    navigate(notification.type === 'invite' ? '/organisations' : `/workspace/${notification.workspace_id}`)
     setIsOpen(false)
+  }
+
+  const accept = async (notification) => {
+    const res = await acceptInvite(notification)
+    setIsOpen(false)
+    if (res?.success) navigate(`/workspace/${res.orgId}`)
   }
 
   return (
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
+        title="Notifications"
+        aria-label={`Notifications${unreadCount ? ` (${unreadCount} unread)` : ''}`}
         className="relative p-2 rounded-lg hover:bg-[#f3f4f6] dark:hover:bg-[#374151] transition-colors cursor-pointer"
       >
         <FiBell className="text-xl text-[#6b7280] dark:text-[#9ca3af]" />
@@ -158,7 +148,7 @@ const NotificationBell = () => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
-                              acceptInvite(notification)
+                              accept(notification)
                             }}
                             className="px-3 py-1 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700"
                           >

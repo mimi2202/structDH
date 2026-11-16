@@ -1,5 +1,6 @@
 // src/pages/StaircaseResults.jsx
 import React, { useRef, useState } from "react";
+import { guardNavigation } from "../utils/unsavedGuard";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FiArrowLeft, FiCheckCircle, FiXCircle, FiFileText, FiX, FiAlertTriangle, FiDownload } from "react-icons/fi";
 import { exportElementToPdf } from "../utils/exportPdf";
@@ -39,7 +40,7 @@ export default function StaircaseResults() {
         <div className={`${CARD} p-8 text-center max-w-md`}>
           <FiAlertTriangle className="mx-auto mb-3 text-amber-500" size={28} />
           <p className={`mb-4 ${MAIN}`}>No design results. Run a staircase design first.</p>
-          <button onClick={() => navigate("/staircase-design")} className="rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
+          <button onClick={() => guardNavigation(() => navigate("/staircase-design"))} className="rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
             Go to Staircase Input
           </button>
         </div>
@@ -184,14 +185,14 @@ export default function StaircaseResults() {
         ]} />
       <div ref={sheetRef} className="w-full space-y-5">
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <button onClick={() => navigate("/staircase-design")} className={`flex items-center gap-2 text-sm ${SUB}`}>
+          <button onClick={() => guardNavigation(() => navigate("/staircase-design"))} className={`flex items-center gap-2 text-sm ${SUB}`}>
             <FiArrowLeft size={16} /> Back to Input
           </button>
           <div className="flex items-center gap-3">
             <button onClick={() => setShowReport(true)} className="flex items-center gap-2 rounded-lg border border-[#e2e8f0] dark:border-[#334155] px-4 py-2 text-sm text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#f1f5f9] dark:hover:bg-[#334155]">
               <FiFileText size={15} /> Detailed Report
             </button>
-            <button onClick={download} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
+            <button data-pdf-download data-shortcut="pdf" onClick={download} className="flex items-center gap-2 rounded-lg bg-[#0A2F44] px-4 py-2 text-sm font-medium text-white hover:bg-[#082636]">
               <FiDownload size={15} /> Download PDF
             </button>
           </div>

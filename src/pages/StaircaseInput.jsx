@@ -245,7 +245,7 @@ export default function StaircaseInput() {
         </div>
 
         <div className="mt-6 flex items-center justify-end gap-3 border-t border-[#e2e8f0] dark:border-[#334155] pt-5">
-          <button onClick={run} disabled={busy}
+          <button data-shortcut="run" title="Run the design (Ctrl+Enter)" onClick={run} disabled={busy}
             className="flex items-center justify-center gap-2 rounded-lg bg-[#0A2F44] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#082636] disabled:opacity-50">
             {busy ? <FiLoader className="animate-spin" size={15} /> : null} Save & Proceed to Design
           </button>

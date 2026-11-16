@@ -1,13 +1,34 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 
-// TEMPORARY MOCK DATA - REMOVE WHEN BACKEND IS READY
-const MOCK_USER = {
-  id: "mock-user-1",
-  name: "John Engineer",
-  email: "john@example.com",
-  username: "johnengineer",
-  profession: "structural_engineer",
-  avatar: null
+// Accounts are kept in this browser (no auth backend yet): one record per
+// email in `local_users`, so a profile (name, photo, ...) and the user id that
+// projects and design activity hang off survive signing out and back in.
+const USERS_KEY = 'local_users';
+const readUsers = () => {
+  try { const v = JSON.parse(localStorage.getItem(USERS_KEY)); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+};
+const writeUser = (u) => {
+  const others = readUsers().filter((x) => x.id !== u.id);
+  try { localStorage.setItem(USERS_KEY, JSON.stringify([...others, u])); }
+  catch { throw new Error('Not enough browser storage to save the profile (try a smaller photo).'); }
+};
+const findUser = (key) => {
+  const k = String(key || '').trim().toLowerCase();
+  if (!k) return null;
+  return readUsers().find((u) => u.email?.toLowerCase() === k || u.username?.toLowerCase() === k) || null;
+};
+// Session: localStorage when "remember me", else sessionStorage (closing the
+// browser signs out). Activity logging reads it via utils/activity.js.
+const saveSession = (u, remember) => {
+  const store = remember ? localStorage : sessionStorage;
+  store.setItem('auth_user', JSON.stringify(u));
+  if (!store.getItem('auth_token')) store.setItem('auth_token', 'local_' + Date.now());
+};
+const refreshSession = (u) => {
+  for (const store of [localStorage, sessionStorage]) {
+    if (store.getItem('auth_user')) store.setItem('auth_user', JSON.stringify(u));
+  }
 };
 
 const AuthContext = createContext();
@@ -22,13 +43,17 @@ export const AuthProvider = ({ children }) => {
   // Check if user is already logged in on mount
   useEffect(() => {
     // Check localStorage for existing session
-    const savedUser = localStorage.getItem('auth_user');
-    const savedToken = localStorage.getItem('auth_token');
+    const savedUser = localStorage.getItem('auth_user') || sessionStorage.getItem('auth_user');
+    const savedToken = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
     const savedPersonalOrg = localStorage.getItem('personal_organization');
     
     if (savedUser && savedToken) {
-      setUser(JSON.parse(savedUser));
-      setProfile(JSON.parse(savedUser));
+      // Prefer the stored account (it carries later profile edits).
+      const parsed = JSON.parse(savedUser);
+      const account = readUsers().find((u) => u.id === parsed.id) || parsed;
+      if (!readUsers().some((u) => u.id === account.id)) { try { writeUser(account); } catch { /* full */ } }
+      setUser(account);
+      setProfile(account);
       if (savedPersonalOrg) {
         setPersonalOrganization(JSON.parse(savedPersonalOrg));
       }
@@ -38,7 +63,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const fetchProfile = async () => {
-    return user || MOCK_USER;
+    return user;
   };
 
   // Create personal organization for new user
@@ -98,24 +123,24 @@ export const AuthProvider = ({ children }) => {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 1500));
     
-    // Create a user object from credentials
-    const loggedInUser = {
-      id: `user_${Date.now()}`,
-      name: credentials.username || credentials.email?.split('@')[0] || 'User',
-      email: credentials.email || 'user@example.com',
-      username: credentials.username || credentials.email?.split('@')[0],
-      profession: 'structural_engineer',
-      avatar: null
-    };
+    // Existing account for this email / username, else a new one.
+    let loggedInUser = findUser(credentials.email || credentials.username);
+    if (!loggedInUser) {
+      loggedInUser = {
+        id: `user_${Date.now()}`,
+        name: credentials.username || credentials.email?.split('@')[0] || 'User',
+        email: credentials.email || '',
+        username: credentials.username || credentials.email?.split('@')[0],
+        profession: 'structural_engineer',
+        avatar: null,
+        created_at: new Date().toISOString()
+      };
+      writeUser(loggedInUser);
+    }
     
     setUser(loggedInUser);
     setProfile(loggedInUser);
-    
-    // Store in localStorage if rememberMe
-    if (rememberMe) {
-      localStorage.setItem('auth_user', JSON.stringify(loggedInUser));
-      localStorage.setItem('auth_token', 'mock_token_' + Date.now());
-    }
+    saveSession(loggedInUser, rememberMe);
     
     // Load user's personal organization
     const savedPersonalOrg = localStorage.getItem('personal_organization');
@@ -135,23 +160,23 @@ export const AuthProvider = ({ children }) => {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 1500));
     
-    // Create new user object
+    // Create new user object (an existing account with this email keeps its id)
+    const existing = findUser(userData.email);
     const newUser = {
-      id: `user_${Date.now()}`,
+      ...(existing || {}),
+      id: existing?.id || `user_${Date.now()}`,
       name: userData.name,
       email: userData.email,
       username: userData.email?.split('@')[0] || userData.name?.toLowerCase().replace(/\s/g, ''),
       profession: userData.profession || 'structural_engineer',
       avatar: null,
-      created_at: new Date().toISOString()
+      created_at: existing?.created_at || new Date().toISOString()
     };
     
     setUser(newUser);
     setProfile(newUser);
-    
-    // Store in localStorage
-    localStorage.setItem('auth_user', JSON.stringify(newUser));
-    localStorage.setItem('auth_token', 'mock_token_' + Date.now());
+    writeUser(newUser);
+    saveSession(newUser, true);
     
     // Create personal organization for the new user
     const personalOrgResult = await createPersonalOrganization(newUser.id, newUser.name);
@@ -175,6 +200,8 @@ export const AuthProvider = ({ children }) => {
     // Clear localStorage
     localStorage.removeItem('auth_user');
     localStorage.removeItem('auth_token');
+    sessionStorage.removeItem('auth_user');
+    sessionStorage.removeItem('auth_token');
     // Don't remove organizations data as it might be needed for other users
     // But clear session-specific data
     
@@ -194,19 +221,22 @@ export const AuthProvider = ({ children }) => {
   };
 
   const updateProfile = async (profileData) => {
-    console.log('Mock update profile:', profileData);
-    setLoading(true);
-    
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    const updatedProfile = { ...(user || MOCK_USER), ...profileData };
+    if (!user) return { success: false, error: 'Not signed in' };
+    const email = profileData.email?.trim();
+    if (email && email.toLowerCase() !== (user.email || '').toLowerCase()) {
+      const clash = findUser(email);
+      if (clash && clash.id !== user.id) return { success: false, error: 'Another account in this browser already uses that email.' };
+    }
+    const updatedProfile = { ...user, ...profileData, updated_at: new Date().toISOString() };
+    try {
+      writeUser(updatedProfile);
+      refreshSession(updatedProfile);
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
     setProfile(updatedProfile);
     setUser(updatedProfile);
-    
-    localStorage.setItem('auth_user', JSON.stringify(updatedProfile));
-    
-    setLoading(false);
-    return { success: true };
+    return { success: true, user: updatedProfile };
   };
 
   // Load user's organizations

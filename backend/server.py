@@ -11,7 +11,7 @@ from routers import foundation
 from routers import staircase
   
 app = FastAPI(
-    title="StructAI Design Engine",
+    title="Sphere Design Hub Engine",
     description="AI-driven structural design optimization for reinforced concrete slabs",
     version="1.0.0",
 )
@@ -37,7 +37,7 @@ app.include_router(staircase.router, prefix="/api/staircase")
 
 @app.get("/")
 async def root():
-    return {"status": "running", "app": "StructAI Design Engine", "version": "1.0.0", "docs": "/docs"}
+    return {"status": "running", "app": "Sphere Design Hub Engine", "version": "1.0.0", "docs": "/docs"}
 
 
 @app.get("/health")

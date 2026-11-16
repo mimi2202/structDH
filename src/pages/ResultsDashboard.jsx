@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { 
   FiCheckCircle, FiAlertTriangle, FiXCircle, FiTrendingUp,
-  FiBarChart2, FiActivity, FiDollarSign, FiFileText,
+  FiBarChart2, FiActivity, FiFileText,
   FiDownload, FiShare2, FiGrid, FiLayers, FiArrowLeft
 } from 'react-icons/fi';
 import ResultsSummaryCards from '../components/results/ResultsSummaryCards';
@@ -11,8 +11,6 @@ import DesignForcesTable from '../components/results/DesignForcesTable';
 import ReinforcementDetails from '../components/results/ReinforcementDetails';
 import DeflectionPlot from '../components/results/DeflectionPlot';
 import ComplianceChecks from '../components/results/ComplianceChecks';
-import CostBreakdown from '../components/results/CostBreakdown';
-import OptimizationTable from '../components/results/OptimizationTable';
 import SFD_BMD_Graphs from '../components/results/SFD_BMD_Graphs';
 
 const ResultsDashboard = () => {
@@ -85,7 +83,6 @@ const ResultsDashboard = () => {
     { id: 'designForces', label: 'Design Forces', icon: FiActivity },
     { id: 'reinforcement', label: 'Reinforcement', icon: FiLayers },
     { id: 'checks', label: 'Code Checks', icon: FiCheckCircle },
-    { id: 'cost', label: 'Cost & Optimization', icon: FiDollarSign },
     { id: 'graphs', label: 'Graphs', icon: FiBarChart2 },
   ];
 
@@ -127,7 +124,7 @@ const ResultsDashboard = () => {
                 </h1>
               </div>
               <p className="text-sm text-[#64748b] dark:text-[#94a3b8]">
-                Slab Design Optimization • EN 1992-1-1 (EC2) • Powered by StructAI Engine
+                Slab Design Optimization • EN 1992-1-1 (EC2) • Powered by Sphere Design Hub Engine
               </p>
             </div>
             <div className="flex items-center space-x-3">
@@ -197,12 +194,6 @@ const ResultsDashboard = () => {
             <>
               <ComplianceChecks data={resultsData.compliance} />
               <DeflectionPlot data={resultsData.deflection} />
-            </>
-          )}
-          {activeTab === 'cost' && (
-            <>
-              <CostBreakdown data={resultsData.costBreakdown} />
-              <OptimizationTable data={resultsData.optimizationOptions} />
             </>
           )}
           {activeTab === 'graphs' && (

@@ -167,7 +167,7 @@ const StructuralLoadingAnimation = () => {
               />
             </svg>
 
-            {/* The Logo SA with Construction Effect */}
+            {/* The Logo SDH with Construction Effect */}
             <div className="relative z-10 flex items-center justify-center">
               <motion.span
                 className="text-5xl font-bold text-white"
@@ -217,7 +217,7 @@ const StructuralLoadingAnimation = () => {
                   delay: 0.3
                 }}
               >
-                A
+                DH
               </motion.span>
             </div>
 

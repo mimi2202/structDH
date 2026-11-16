@@ -112,7 +112,7 @@ const SavedDesigns = () => {
             </h3>
             <p className="text-[#6b7280] mb-4">Run a design and press Save on its results page to see it here</p>
             <Link
-              to="/new-design"
+              to="/quick-design"
               className="inline-block px-4 py-2 bg-[#0A2F44] text-white rounded-lg hover:bg-[#082636]"
             >
               Create New Design

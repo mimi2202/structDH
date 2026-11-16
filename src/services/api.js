@@ -1,5 +1,15 @@
 // src/services/api.js
+import { recordDesign } from '../utils/activity';
+
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+
+// Every design request goes through this, so each successful calculation is
+// counted once in the dashboard's activity heatmap and streak.
+async function designFetch(url, options) {
+  const res = await fetch(url, options);
+  if (res.ok) recordDesign();
+  return res;
+}
 
 // FastAPI/Pydantic validation errors come back as
 //   { detail: [{ type, loc, msg, input, ctx }, ...] }
@@ -60,6 +70,9 @@ export const slabAPI = {
         thickness: parseFloat(formData.thickness),
         clear_cover: parseFloat(formData.clearCover)
       },
+      // detailing / bar schedule
+      support_width_mm: parseFloat(formData.supportWidth) || 230,
+      n_members: Math.max(1, parseInt(formData.nMembers, 10) || 1),
       materials: {
         concrete_grade: formData.concreteGrade,
         steel_grade: formData.steelGrade,
@@ -84,7 +97,7 @@ export const slabAPI = {
       bar_diameters: [parseInt(formData.mainBarDia) || 12],
       auto_bars: !!formData.autoBars,
       use_ai: false,
-      region: "Nigeria",
+      region: "UK", // cost-rate table only (cost is not shown)
       building_use: formData.buildingUse || "office",
       design_basis: {
         designer_name: (formData.designerName || "").trim() || null,
@@ -96,7 +109,7 @@ export const slabAPI = {
       }
     };
 
-    const response = await fetch(`${API_BASE}${ENDPOINTS.slab}`, {
+    const response = await designFetch(`${API_BASE}${ENDPOINTS.slab}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request)
@@ -111,7 +124,7 @@ export const slabAPI = {
     return response.json();
   },
 
-  getRates: async (region = 'Nigeria') => {
+  getRates: async (region = 'UK') => {
     const response = await fetch(`${API_BASE}/api/rates/${region}`);
     if (!response.ok) throw new Error('Failed to fetch rates');
     return response.json();
@@ -131,7 +144,7 @@ export const columnAPI = {
    *                           already shaped as ColumnDesignRequest.
    */
   startDesign: async (request) => {
-    const response = await fetch(`${API_BASE}${ENDPOINTS.column}`, {
+    const response = await designFetch(`${API_BASE}${ENDPOINTS.column}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -183,7 +196,10 @@ export const beamAPI = {
       bar_diameters: [parseInt(formData.mainBarDia) || 16],
       auto_bars: !!formData.autoBars,
       link_diameter: parseInt(formData.linkDiameter) || 8,
-      region: formData.region || "Nigeria",
+      region: "UK", // cost-rate table only (cost is not shown)
+      // detailing / bar schedule
+      support_width_mm: parseFloat(formData.supportWidth) || 230,
+      n_members: Math.max(1, parseInt(formData.nMembers, 10) || 1),
       design_basis: {
         designer_name: (formData.designerName || "").trim() || null,
         designer_qualifications: (formData.designerQualifications || "").trim() || null,
@@ -194,7 +210,7 @@ export const beamAPI = {
       }
     };
 
-    const res = await fetch(`${API_BASE}${ENDPOINTS.beam}`, {
+    const res = await designFetch(`${API_BASE}${ENDPOINTS.beam}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -217,7 +233,7 @@ export const beamAPI = {
    * @param {object} request - already shaped as ContinuousBeamRequest.
    */
   startContinuousDesign: async (request) => {
-    const res = await fetch(`${API_BASE}${ENDPOINTS.continuousBeam}`, {
+    const res = await designFetch(`${API_BASE}${ENDPOINTS.continuousBeam}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -273,7 +289,7 @@ export const continuousBeamAPI = {
       },
       bar_diameters: form.barDiameters || [16, 20, 25, 32],
       link_diameter: parseInt(form.linkDiameter) || 8,
-      region: form.region || "Nigeria",
+      region: "UK", // cost-rate table only (cost is not shown)
       design_basis: {
         designer_name: (form.designerName || "").trim() || null,
         designer_qualifications: (form.designerQualifications || "").trim() || null,
@@ -321,9 +337,13 @@ export const continuousSlabAPI = {
       bar_diameters: [parseInt(form.mainBarDia) || 12],
       auto_bars: !!form.autoBars,
       cover_tolerance: parseFloat(form.coverTolerance) || 5,
+      // detailing / bar schedule: slab width across the spans (1000 = per metre strip)
+      slab_width_mm: parseFloat(form.slabWidth) || 1000,
+      support_width_mm: parseFloat(form.supportWidth) || 230,
+      n_members: Math.max(1, parseInt(form.nMembers, 10) || 1),
       // "Custom" ("") means occupancy not stated -> backend assumes psi_2 = 0.6
       occupancy: form.occupancy || null,
-      region: form.region || "Nigeria",
+      region: "UK", // cost-rate table only (cost is not shown)
       design_basis: {
         designer_name: (form.designerName || "").trim() || null,
         designer_qualifications: (form.designerQualifications || "").trim() || null,
@@ -334,7 +354,7 @@ export const continuousSlabAPI = {
       }
     };
 
-    const res = await fetch(`${API_BASE}${ENDPOINTS.continuousSlab}`, {
+    const res = await designFetch(`${API_BASE}${ENDPOINTS.continuousSlab}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -351,7 +371,7 @@ export const foundationAPI = {
   designPad: async (payload) => {
     // payload already carries engine fields; strip the display-only _meta
     const { _meta, ...request } = payload;
-    const res = await fetch(`${API_BASE}${ENDPOINTS.padFoundation}`, {
+    const res = await designFetch(`${API_BASE}${ENDPOINTS.padFoundation}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -364,7 +384,7 @@ export const foundationAPI = {
   },
 
   designCombined: async (payload) => {
-    const res = await fetch(`${API_BASE}${ENDPOINTS.combinedFoundation}`, {
+    const res = await designFetch(`${API_BASE}${ENDPOINTS.combinedFoundation}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -382,7 +402,7 @@ export const foundationAPI = {
 // as null so the engine picks the bars.
 export const staircaseAPI = {
   design: async (payload) => {
-    const res = await fetch(`${API_BASE}${ENDPOINTS.staircase}`, {
+    const res = await designFetch(`${API_BASE}${ENDPOINTS.staircase}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

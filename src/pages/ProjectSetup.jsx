@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   FiArrowLeft,
@@ -15,6 +15,9 @@ import {
 } from 'react-icons/fi'
 import { useTheme } from '../contexts/ThemeContext'
 import { useWorkspace } from '../contexts/WorkspaceContext'
+import Dropdown from '../components/Dropdown'
+import { PERSONAL_WS, ALL_WS, projectWsId } from '../utils/projects'
+import { can } from '../utils/orgRbac'
 
 // Hardcoded UK locations from the document
 const ukLocations = [
@@ -72,7 +75,12 @@ const ProjectSetup = () => {
   const { workspaceId } = useParams()
   const navigate = useNavigate()
   const { isDarkMode, toggleDarkMode } = useTheme()
-  const { createProject } = useWorkspace()
+  const { createProject, workspaces } = useWorkspace()
+  // Personal unless created from an organisation's page (or chosen below).
+  const [orgChoice, setOrgChoice] = useState(
+    workspaceId && workspaceId !== ALL_WS ? workspaceId : PERSONAL_WS
+  )
+  const [nameError, setNameError] = useState('')
   const [step, setStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showLoading, setShowLoading] = useState(false)
@@ -80,10 +88,24 @@ const ProjectSetup = () => {
   const [locationInput, setLocationInput] = useState('')
   const [locationSuggestions, setLocationSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
+  // Where the location list opens: below the field, or above it when the
+  // window has no room below (it used to run off the bottom of the screen).
+  const locationRef = useRef(null)
+  const blurTimer = useRef(null) // closes the list after a click on it has landed
+  const [suggestPlace, setSuggestPlace] = useState({ up: false, maxHeight: 256 })
+  const placeSuggestions = () => {
+    const el = locationRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const below = window.innerHeight - r.bottom - 12
+    const above = r.top - 12
+    const up = below < 220 && above > below
+    setSuggestPlace({ up, maxHeight: Math.max(120, Math.min(256, up ? above : below)) })
+  }
 
   // Form state
   const [formData, setFormData] = useState({
-    projectName: 'UDM Project',
+    projectName: '',
     buildingType: 'commercial',
     location: 'London, UK',
     length: '25',
@@ -131,7 +153,7 @@ const ProjectSetup = () => {
           }
           return prev + 10
         })
-      }, 1000)
+      }, 80)
       return () => clearInterval(interval)
     }
   }, [showLoading])
@@ -153,6 +175,11 @@ const ProjectSetup = () => {
 
   const handleNext = () => {
     if (step === 1) {
+      if (!formData.projectName.trim()) {
+        setNameError('Give the project a name.')
+        return
+      }
+      setNameError('')
       setStep(2)
     } else if (step === 2) {
       setShowLoading(true)
@@ -167,7 +194,7 @@ const ProjectSetup = () => {
     setIsSubmitting(true)
 
     const projectData = {
-      name: formData.projectName,
+      name: formData.projectName.trim(),
       project_type: formData.buildingType,
       location: formData.location,
       description: `${formData.buildingType} building`,
@@ -182,9 +209,10 @@ const ProjectSetup = () => {
     }
 
     try {
-      const result = await createProject(workspaceId, projectData)
+      const result = await createProject(orgChoice, projectData)
       if (result.success) {
-        navigate(`/workspace/${workspaceId}/projects/${result.project.id}/slab-input`)
+        // straight into the project's design hub (no second loading screen)
+        navigate(`/workspace/${projectWsId(result.project)}/projects/${result.project.id}/design`)
       } else {
         console.error('Failed to create project:', result.error)
         setIsSubmitting(false)
@@ -214,17 +242,17 @@ const ProjectSetup = () => {
         {/* Logo */}
         <div className="flex items-center justify-center mb-6">
           <div className="w-12 h-12 bg-[#0A2F44] rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-xl">SA</span>
+            <span className="text-white font-bold text-lg">SDH</span>
           </div>
         </div>
 
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-[#02090d] dark:text-white">
-            Create Your Workspace
+            New Project
           </h1>
           <p className="text-sm text-[#6b7280] dark:text-[#9ca3af] mt-2">
-            Set up your workspace to start collaborating
+            Personal projects can be moved into an organisation later
           </p>
         </div>
 
@@ -254,7 +282,7 @@ const ProjectSetup = () => {
           <div className="py-12 flex flex-col items-center justify-center min-h-[400px]">
             <div className="relative mb-8">
               <div className="w-24 h-24 bg-[#0A2F44] rounded-2xl flex items-center justify-center animate-pulse">
-                <span className="text-white text-4xl font-bold">SA</span>
+                <span className="text-white text-4xl font-bold">SDH</span>
               </div>
               <div className="absolute -top-2 -right-2">
                 <FiLoader className="text-3xl text-[#0A2F44] animate-spin" />
@@ -291,10 +319,33 @@ const ProjectSetup = () => {
                   name="projectName"
                   value={formData.projectName}
                   onChange={handleChange}
-                  placeholder="e.g., Acme Engineering"
+                  placeholder="e.g., Riverside Apartments"
                   className="w-full px-4 py-3 rounded-lg border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0A2F44]"
                   required
                 />
+                {nameError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{nameError}</p>}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#374151] dark:text-[#d1d5db] mb-2">
+                  Organisation
+                </label>
+                <Dropdown
+                  value={orgChoice}
+                  onChange={setOrgChoice}
+                  className="py-3"
+                  options={[
+                    { value: PERSONAL_WS, label: 'Personal (no organisation)' },
+                    ...workspaces
+                      .filter((w) => can(w.userRole, 'project.create'))
+                      .map((w) => ({ value: w.id, label: w.name })),
+                  ]}
+                />
+                {workspaces.length === 0 && (
+                  <p className="mt-1 text-xs text-[#6b7280] dark:text-[#9ca3af]">
+                    You are not in an organisation yet, so this project will be personal.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -331,21 +382,23 @@ const ProjectSetup = () => {
                 <label className="block text-sm font-medium text-[#374151] dark:text-[#d1d5db] mb-2">
                   Location
                 </label>
-                <div className="relative">
+                <div className="relative" ref={locationRef}>
                   <FiMapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#9ca3af]" />
                   <input
                     type="text"
-                    value={locationInput || formData.location}
-                    onChange={handleLocationChange}
-                    onFocus={() => locationInput.length > 1 && setShowSuggestions(true)}
+                    value={formData.location}
+                    onChange={(e) => { placeSuggestions(); handleLocationChange(e) }}
+                    onFocus={() => { clearTimeout(blurTimer.current); placeSuggestions(); if (locationInput.length > 1) setShowSuggestions(true) }}
+                    onBlur={() => { blurTimer.current = setTimeout(() => setShowSuggestions(false), 150) }}
+                    onKeyDown={(e) => { if (e.key === 'Escape') setShowSuggestions(false) }}
                     placeholder="e.g., London, UK or postcode"
                     className="w-full pl-10 pr-4 py-3 rounded-lg border border-[#e5e7eb] dark:border-[#374151] bg-white dark:bg-[#374151] text-[#02090d] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0A2F44]"
                   />
-                </div>
 
-                {/* Suggestions Dropdown */}
+                {/* Suggestions Dropdown (inside the field's box, so it can open up or down) */}
                 {showSuggestions && locationSuggestions.length > 0 && (
-                  <div className="absolute z-20 w-full mt-1 bg-white dark:bg-[#1f2937] border border-[#e5e7eb] dark:border-[#374151] rounded-lg shadow-xl max-h-64 overflow-auto">
+                  <div data-location-suggestions className={`absolute left-0 z-20 w-full bg-white dark:bg-[#1f2937] border border-[#e5e7eb] dark:border-[#374151] rounded-lg shadow-xl overflow-auto ${suggestPlace.up ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+                    style={{ maxHeight: suggestPlace.maxHeight }}>
                     {locationSuggestions.map((loc, idx) => (
                       <button
                         key={idx}
@@ -366,6 +419,7 @@ const ProjectSetup = () => {
                     ))}
                   </div>
                 )}
+                </div>
               </div>
             </div>
 
@@ -401,7 +455,13 @@ const ProjectSetup = () => {
                       {formData.buildingType}
                     </p>
                   </div>
-                  <div className="col-span-2">
+                  <div>
+                    <p className="text-[#6b7280] dark:text-[#9ca3af]">Organisation</p>
+                    <p className="font-medium text-[#02090d] dark:text-white">
+                      {workspaces.find((w) => w.id === orgChoice)?.name || 'Personal'}
+                    </p>
+                  </div>
+                  <div>
                     <p className="text-[#6b7280] dark:text-[#9ca3af]">Location</p>
                     <p className="font-medium text-[#02090d] dark:text-white">
                       {formData.location}

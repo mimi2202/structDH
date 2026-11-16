@@ -1,44 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { FiTrendingUp, FiCalendar } from 'react-icons/fi';
+import { streaks } from '../../utils/activity';
 
-const DesignStreak = ({ userId }) => {
-  const [streak, setStreak] = useState(0);
-
-  useEffect(() => {
-    const loadStreak = () => {
-      const savedStreak = localStorage.getItem(`streak_${userId}`);
-      const savedLastLogin = localStorage.getItem(`lastLogin_${userId}`);
-      
-      const today = new Date().toDateString();
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toDateString();
-      
-      if (savedLastLogin) {
-        const lastLogin = new Date(savedLastLogin).toDateString();
-        
-        if (lastLogin === today) {
-          setStreak(parseInt(savedStreak) || 0);
-        } else if (lastLogin === yesterdayStr) {
-          const newStreak = (parseInt(savedStreak) || 0) + 1;
-          setStreak(newStreak);
-          localStorage.setItem(`streak_${userId}`, newStreak);
-        } else {
-          setStreak(1);
-          localStorage.setItem(`streak_${userId}`, 1);
-        }
-      } else {
-        setStreak(1);
-        localStorage.setItem(`streak_${userId}`, 1);
-      }
-      
-      localStorage.setItem(`lastLogin_${userId}`, new Date().toISOString());
-    };
-    
-    if (userId) {
-      loadStreak();
-    }
-  }, [userId]);
+// Days in a row with at least one design calculation (from the activity log
+// written by services/api.js). It used to count days the dashboard was opened.
+const DesignStreak = ({ days }) => {
+  const { current, longest, activeToday } = streaks(days || {});
 
   return (
     <div className="bg-white dark:bg-[#1f2937] rounded-xl shadow-lg p-6 border border-[#e5e7eb] dark:border-[#374151]">
@@ -51,16 +18,18 @@ const DesignStreak = ({ userId }) => {
         </div>
         <FiCalendar className="text-[#6b7280] dark:text-[#9ca3af]" />
       </div>
-      
+
       <div className="text-3xl font-bold text-[#02090d] dark:text-white mb-2">
-        {streak} {streak === 1 ? 'day' : 'days'}
+        {current} {current === 1 ? 'day' : 'days'}
       </div>
       <p className="text-sm text-[#6b7280] dark:text-[#9ca3af]">
-        Consecutive design days
+        Consecutive days with a design · longest {longest} {longest === 1 ? 'day' : 'days'}
       </p>
-      
+
       <p className="text-xs text-[#9ca3af] dark:text-[#6b7280] mt-3">
-        Streak resets if you miss a day
+        {current > 0 && !activeToday
+          ? 'Run a design today to keep the streak going.'
+          : 'Streak resets if you miss a day.'}
       </p>
     </div>
   );

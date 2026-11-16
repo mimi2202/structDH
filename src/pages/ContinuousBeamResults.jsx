@@ -1,7 +1,10 @@
 import React, { useState, useRef, useEffect } from "react";
+import { guardNavigation } from "../utils/unsavedGuard";
 import { useNavigate, useLocation } from "react-router-dom";
 import { exportElementToPdf } from "../utils/exportPdf";
 import FullDocument from "../components/results/FullDocument";
+import DetailingSchedule from "../components/results/DetailingSchedule";
+import MemberDetailDrawing from "../components/results/MemberDetailDrawing";
 import { DIAGRAM } from "../components/results/diagramTheme";
 import { buildCoverHtml } from "../utils/reportCover";
 import { useDesignMeta } from "../contexts/DesignMetaContext";
@@ -20,7 +23,7 @@ const HOG = DIAGRAM.hogging;   // negative / hogging (shared colours, components
 const SAG = DIAGRAM.sagging;   // positive / sagging
 const SHR = DIAGRAM.shear;
 
-const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection"];
+const TABS = ["Overview", "Flexural Design", "Shear Design", "Deflection", "Detailing & Schedule"];
 
 // what each tab holds, for the cover page of its PDF
 const TAB_NOTES = {
@@ -28,6 +31,7 @@ const TAB_NOTES = {
   "Flexural Design": "the bending design in full: K, lever arm, tension and minimum steel, bars provided (EC2 6.1).",
   "Shear Design": "the shear design in full: resistance without links, links where needed (EC2 6.2).",
   "Deflection": "the span/depth deflection check for every span (EC2 7.4.2).",
+  "Detailing & Schedule": "the reinforcement drawing, bar marks and callouts, anchorage at simple supports and the bending / quantity schedule.",
 };
 
 export default function ContinuousBeamResults() {
@@ -57,7 +61,7 @@ export default function ContinuousBeamResults() {
           <FiAlertTriangle className="mx-auto mb-4 text-6xl text-yellow-500" />
           <h2 className={`mb-2 text-xl font-bold ${MAIN}`}>No continuous beam results</h2>
           <p className={`mb-6 ${SUB}`}>Run a continuous beam design first.</p>
-          <button onClick={() => navigate("/continuous-beam")} className="rounded-lg bg-[#0A2F44] px-6 py-2 text-white hover:bg-[#082636]">Back to Input</button>
+          <button onClick={() => guardNavigation(() => navigate("/continuous-beam"))} className="rounded-lg bg-[#0A2F44] px-6 py-2 text-white hover:bg-[#082636]">Back to Input</button>
         </div>
       </div>
     );
@@ -195,7 +199,7 @@ export default function ContinuousBeamResults() {
             {pass ? <FiCheckCircle /> : <FiXCircle />} {pass ? "SAFE" : "CHECK"}
           </span>
           <button onClick={() => setReportOpen(true)} className="flex items-center gap-2 rounded-lg border border-[#0A2F44] dark:border-[#66a4c2] px-3 py-1.5 text-sm font-medium text-[#0A2F44] dark:text-[#66a4c2] hover:bg-[#e6f0f5] dark:hover:bg-[#1e3a4a]"><FiFileText size={15} /> Detailed Report</button>
-          <button onClick={() => exportElementToPdf(sheetRef.current, `ContinuousBeam-${summary.beam_id || "report"}-${tab}`, buildCoverHtml({
+          <button data-pdf-download data-shortcut="pdf" onClick={() => exportElementToPdf(sheetRef.current, `ContinuousBeam-${summary.beam_id || "report"}-${tab}`, buildCoverHtml({
             element: "Continuous Beam", member: summary.beam_id, section: tab, sectionNote: TAB_NOTES[tab],
             description: `${summary.n_spans}-span continuous reinforced concrete beam designed to BS EN 1992-1-1 for bending, shear and deflection.`,
             facts: [
@@ -246,15 +250,17 @@ export default function ContinuousBeamResults() {
           { title: "Flexural Design", node: <FlexuralTab data={data} /> },
           { title: "Shear Design", node: <ShearTab data={data} /> },
           { title: "Deflection", node: <DeflectionTab data={data} /> },
+          ...(data.detailing ? [{ title: "Detailing & Schedule", node: <DetailingSchedule det={data.detailing} report={report} drawing={<MemberDetailDrawing det={data.detailing} />} /> }] : []),
         ]} />
       )}
 
       {tab === "Flexural Design" && <FlexuralTab data={data} />}
       {tab === "Shear Design" && <ShearTab data={data} />}
       {tab === "Deflection" && <DeflectionTab data={data} />}
+      {tab === "Detailing & Schedule" && <DetailingSchedule det={data.detailing} report={report} drawing={data.detailing && <MemberDetailDrawing det={data.detailing} />} />}
 
       <div className="cb-no-print mt-6 flex items-center justify-between border-t border-[#e2e8f0] dark:border-[#334155] pt-4">
-        <button onClick={() => navigate("/continuous-beam")} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}><FiArrowLeft size={15} /> Back to Input</button>
+        <button onClick={() => guardNavigation(() => navigate("/continuous-beam"))} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium ${SUB} hover:bg-[#f1f5f9] dark:hover:bg-[#1f2937]`}><FiArrowLeft size={15} /> Back to Input</button>
       </div>
 
       {reportOpen && <ReportModal report={report} summary={summary} onClose={() => setReportOpen(false)} />}

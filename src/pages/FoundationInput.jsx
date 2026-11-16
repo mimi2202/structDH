@@ -157,7 +157,10 @@ export default function FoundationInput() {
       const saved = sessionStorage.getItem(DRAFT_KEY);
       if (saved) f = applySettings({ ...DEFAULTS, ...JSON.parse(saved) }, SETTINGS_MAP);
     } catch { /* private mode */ }
-    return searchParams.get("type") === "combined" ? withCombinedLength(f) : f;
+    const type = searchParams.get("type");
+    if (type === "combined") return withCombinedLength(f);
+    if (type === "pad") return { ...f, foundation_type: "pad" };
+    return f;
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -610,7 +613,7 @@ export default function FoundationInput() {
 
         {/* action bar at bottom, full width like other input pages */}
         <div className="mt-6 flex items-center justify-end gap-3 border-t border-[#e2e8f0] dark:border-[#334155] pt-5">
-          <button onClick={run} disabled={busy}
+          <button data-shortcut="run" title="Run the design (Ctrl+Enter)" onClick={run} disabled={busy}
             className="flex items-center justify-center gap-2 rounded-lg bg-[#0A2F44] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#082636] disabled:opacity-50">
             {busy ? <FiLoader className="animate-spin" size={15} /> : null} Save & Proceed to Design
           </button>

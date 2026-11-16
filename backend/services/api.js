@@ -32,7 +32,7 @@ export const beamAPI = {
       },
       bar_diameters: [16, 20, 25, 32],
       link_diameter: 8,
-      region: formData.region || "Nigeria",
+      region: formData.region || "UK",
     };
 
     const res = await fetch(`${API_BASE}/api/beam/design/sync`, {

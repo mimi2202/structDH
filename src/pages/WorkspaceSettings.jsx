@@ -926,7 +926,7 @@ const WorkspaceSettings = () => {
                 Integrations Coming Soon
               </h3>
               <p className="text-[#6b7280] dark:text-[#9ca3af]">
-                Connect StructAI with your favorite tools
+                Connect Sphere Design Hub with your favorite tools
               </p>
             </div>
           </div>

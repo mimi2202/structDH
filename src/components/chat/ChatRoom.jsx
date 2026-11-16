@@ -24,7 +24,7 @@ const ChatRoom = ({ workspaceId, projectId, projectName }) => {
   const { messages, onlineUsers, sendMessage, sendFile, startCall, isCallActive } = useChat()
 
   const [messageInput, setMessageInput] = useState('')
-  const [isExpanded, setIsExpanded] = useState(true)
+  const [isExpanded, setIsExpanded] = useState(false) // starts collapsed: expanded it covered the project page
   const [showUsers, setShowUsers] = useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const messagesEndRef = useRef(null)
