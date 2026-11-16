@@ -1,6 +1,6 @@
 // Build-time prerender of the public pages (run after `vite build` and
 // `vite build --ssr src/public/entry-server.jsx --outDir dist-ssr`).
-//   dist/index.html            home page (prerendered)
+//   dist/index.html            app shell for "/" (dashboard or login), noindex
 //   dist/<slug>.html           each public page (served at /<slug> by cleanUrls)
 //   dist/404.html              real 404 page for unknown URLs
 //   dist/app.html              empty app shell, noindex (app routes rewrite here)
@@ -23,7 +23,7 @@ const { render, PUBLIC_ROUTES, NOT_FOUND, SITE_URL } = await import(pathToFileUR
   const res = rewrites.filter((r) => r.destination === "/app.html").map((r) => toRe(r.source));
   const publicPaths = new Set(PUBLIC_ROUTES.map((r) => r.path));
   const missing = [...app.matchAll(/path="([^"]+)"/g)].map((m) => m[1])
-    .filter((p) => !publicPaths.has(p) && p !== "*")
+    .filter((p) => !publicPaths.has(p) && p !== "*" && p !== "/")   // "/" is dist/index.html, the app shell
     .map((p) => p.replace(/:\w+/g, "x1"))
     .filter((p) => !res.some((re) => re.test(p)));
   if (missing.length) {
@@ -52,11 +52,13 @@ const write = (file, html) => {
   fs.writeFileSync(path.join(dist, file), html);
 };
 
-// the app shell first: index.html is about to become the home page
-write("app.html", page({ title: "Sphere Design Hub", description: "Sphere Design Hub app." }, { noindex: true, canonical: false }));
+// the app shell: "/" (index.html, as before: dashboard or login) and app.html (app routes rewrite here)
+const shell = page({ title: "Sphere Design Hub", description: "Sphere Design Hub app." }, { noindex: true, canonical: false });
+write("app.html", shell);
+write("index.html", shell);
 
 for (const r of PUBLIC_ROUTES) {
-  write(r.path === "/" ? "index.html" : `${r.path.slice(1)}.html`, page(r, { body: render(r.path) }));
+  write(`${r.path.slice(1)}.html`, page(r, { body: render(r.path) }));
 }
 write("404.html", page(NOT_FOUND, { body: render(NOT_FOUND.path), noindex: true, canonical: false, marker: "404" }));
 

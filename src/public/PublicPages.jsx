@@ -24,7 +24,7 @@ function Layout({ children, crumbs }) {
             <span className="text-sm font-semibold">{PRODUCT}</span>
           </a>
           <nav aria-label="Main" className="flex items-center gap-4 text-sm">
-            <a href="/#calculators" className="hidden text-[#334155] hover:text-[#0A2F44] sm:inline">Calculators</a>
+            <a href="#calculators" className="hidden text-[#334155] hover:text-[#0A2F44] sm:inline">Calculators</a>
             <a href="/methodology" className="hidden text-[#334155] hover:text-[#0A2F44] sm:inline">Methodology</a>
             <a href={LOGIN_URL} className="rounded-md px-3 py-1.5 font-medium text-white" style={{ background: NAVY }}>Log in</a>
           </nav>
@@ -49,7 +49,7 @@ function Layout({ children, crumbs }) {
             <p className="font-semibold">{PRODUCT}</p>
             <p className="mt-1 text-xs text-[#64748b]">Eurocode 2 structural design tool.</p>
           </div>
-          <div>
+          <div id="calculators">
             <p className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">Calculators</p>
             <ul className="mt-2 space-y-1">
               {MODULES.map((m) => <li key={m.slug}><a href={`/${m.slug}`} className="text-[#334155] hover:underline">{m.name}</a></li>)}
@@ -144,7 +144,7 @@ export function ModulePage({ slug }) {
   const m = moduleBySlug[slug];
   const el = elementByKey[m.element];
   return (
-    <Layout crumbs={[["Home", "/"], ["Calculators", "/#calculators"], [m.name, null]]}>
+    <Layout crumbs={[["Calculators", "#calculators"], [m.name, null]]}>
       <article className="max-w-3xl">
         <h1 className="text-3xl font-bold tracking-tight">{m.h1}</h1>
         <p className="mt-4 text-lg leading-relaxed text-[#334155]">{m.intro}</p>
@@ -175,7 +175,7 @@ export function ModulePage({ slug }) {
 /* ---------------------------------------------------------- methodology */
 export function MethodologyPage() {
   return (
-    <Layout crumbs={[["Home", "/"], ["Methodology", null]]}>
+    <Layout crumbs={[["Methodology", null]]}>
       <article className="max-w-3xl">
         <h1 className="text-3xl font-bold tracking-tight">How Sphere Design Hub calculations are verified</h1>
         <p className="mt-4 text-lg leading-relaxed text-[#334155]">
@@ -227,8 +227,7 @@ export function NotFoundPage() {
       <h1 className="text-3xl font-bold tracking-tight">Page not found</h1>
       <p className="mt-4 text-[15px] text-[#334155]">There is no page at this address.</p>
       <ul className="mt-4 space-y-1.5 text-[15px]">
-        <li><a href="/" className={A}>{PRODUCT} home</a></li>
-        <li><a href="/#calculators" className={A}>All calculators</a></li>
+        <li><a href="#calculators" className={A}>All calculators</a></li>
         <li><a href={LOGIN_URL} className={A}>Log in</a></li>
       </ul>
     </Layout>
